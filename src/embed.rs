@@ -55,8 +55,8 @@ pub struct EmbedderHandle {
 
 impl EmbedderHandle {
     pub fn new() -> Result<Self> {
-        // Check AUTOMEM_MODEL env var, default to Gemma
-        let choice = std::env::var("AUTOMEM_MODEL")
+        // Check MEMEX_MODEL env var, default to Gemma
+        let choice = std::env::var("MEMEX_MODEL")
             .ok()
             .map(|s| ModelChoice::from_str(&s))
             .transpose()?

@@ -2,8 +2,8 @@ use anyhow::Result;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 fn main() -> Result<()> {
-    // Respect AUTOMEM_MODEL env var
-    let (model_type, dims) = match std::env::var("AUTOMEM_MODEL")
+    // Respect MEMEX_MODEL env var
+    let (model_type, dims) = match std::env::var("MEMEX_MODEL")
         .ok()
         .as_deref()
         .map(str::to_lowercase)
