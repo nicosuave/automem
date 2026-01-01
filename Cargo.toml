@@ -1,0 +1,23 @@
+[package]
+name = "automem"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5.0"
+model2vec-rs = "0.1.4"
+crossbeam-channel = "0.5"
+once_cell = "1.19"
+memchr = "2.7"
+memmap2 = "0.9"
+rayon = "1.10"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+simd-json = { version = "0.13", features = ["serde"] }
+tantivy = "0.22"
+toml = "0.8"
+walkdir = "2.5"

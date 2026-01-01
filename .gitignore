@@ -1,0 +1,6 @@
+target/
+claude-code-transcripts/
+.fastembed_cache/
+.codex/
+.claude/settings.local.json
+.DS_Store
