@@ -3,4 +3,5 @@ claude-code-transcripts/
 .fastembed_cache/
 .codex/
 .claude/settings.local.json
+.claude/skills/automem-search/
 .DS_Store
