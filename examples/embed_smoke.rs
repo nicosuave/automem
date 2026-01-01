@@ -1,13 +1,12 @@
 use anyhow::Result;
-use model2vec_rs::model::StaticModel;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 fn main() -> Result<()> {
-    let model = StaticModel::from_pretrained("minishlab/potion-base-8M", None, None, None)?;
-    let input = vec![
-        "hello world".to_string(),
-        "small embedding smoke test".to_string(),
-    ];
-    let embeddings = model.encode_with_args(&input, Some(512), 64);
+    let mut model = TextEmbedding::try_new(
+        InitOptions::new(EmbeddingModel::EmbeddingGemma300M).with_show_download_progress(true),
+    )?;
+    let input = vec!["hello world", "small embedding smoke test"];
+    let embeddings = model.embed(input, None)?;
     if embeddings.is_empty() {
         anyhow::bail!("no embeddings returned");
     }

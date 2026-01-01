@@ -1,19 +1,18 @@
-use anyhow::{Result, anyhow};
-use model2vec_rs::model::StaticModel;
+use anyhow::Result;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 pub struct EmbedderHandle {
-    model: StaticModel,
+    model: TextEmbedding,
     pub dims: usize,
 }
 
 impl EmbedderHandle {
     pub fn new() -> Result<Self> {
-        let model = StaticModel::from_pretrained("minishlab/potion-base-8M", None, None, None)?;
-        let dims = model
-            .encode(&[String::from("dimension_check")])
-            .first()
-            .map(|vec| vec.len())
-            .ok_or_else(|| anyhow!("no embedding returned"))?;
+        let model = TextEmbedding::try_new(
+            InitOptions::new(EmbeddingModel::EmbeddingGemma300M).with_show_download_progress(true),
+        )?;
+        // EmbeddingGemma outputs 768-dim embeddings
+        let dims = 768;
         Ok(Self { model, dims })
     }
 
@@ -21,7 +20,79 @@ impl EmbedderHandle {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        let input: Vec<String> = texts.iter().map(|t| t.to_string()).collect();
-        Ok(self.model.encode_with_args(&input, Some(512), 64))
+        let embeddings = self.model.embed(texts, None)?;
+        Ok(embeddings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_embedder_init() {
+        let embedder = EmbedderHandle::new().expect("failed to init embedder");
+        assert_eq!(embedder.dims, 768);
+    }
+
+    #[test]
+    fn test_embed_single_text() {
+        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let texts = vec!["Hello world"];
+        let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].len(), 768);
+    }
+
+    #[test]
+    fn test_embed_multiple_texts() {
+        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let texts = vec!["Hello world", "How are you?", "Rust is great"];
+        let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
+        assert_eq!(embeddings.len(), 3);
+        for emb in &embeddings {
+            assert_eq!(emb.len(), 768);
+        }
+    }
+
+    #[test]
+    fn test_embed_empty() {
+        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let texts: Vec<&str> = vec![];
+        let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
+        assert!(embeddings.is_empty());
+    }
+
+    #[test]
+    fn test_embeddings_are_different() {
+        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let texts = vec!["cats are cute", "dogs are loyal"];
+        let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
+        // Embeddings for different texts should be different
+        assert_ne!(embeddings[0], embeddings[1]);
+    }
+
+    #[test]
+    fn test_similar_texts_have_similar_embeddings() {
+        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let texts = vec!["the cat sat on the mat", "a cat is sitting on a mat"];
+        let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
+
+        // Compute cosine similarity
+        let dot: f32 = embeddings[0]
+            .iter()
+            .zip(embeddings[1].iter())
+            .map(|(a, b)| a * b)
+            .sum();
+        let norm0: f32 = embeddings[0].iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm1: f32 = embeddings[1].iter().map(|x| x * x).sum::<f32>().sqrt();
+        let cosine_sim = dot / (norm0 * norm1);
+
+        // Similar sentences should have high cosine similarity (> 0.8)
+        assert!(
+            cosine_sim > 0.8,
+            "expected high similarity, got {}",
+            cosine_sim
+        );
     }
 }
