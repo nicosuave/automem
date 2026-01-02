@@ -21,6 +21,7 @@ use walkdir::WalkDir;
 
 const EMBED_BATCH_SIZE: usize = 64;
 const EMBED_MAX_CHARS: usize = 8192;
+const INDEX_PROGRESS_BATCH: u64 = 100;
 
 #[derive(Debug, Clone)]
 pub struct IngestOptions {
@@ -299,6 +300,7 @@ fn writer_loop(
     let mut vector_index = None;
     let mut embedder: Option<EmbedderHandle> = None;
     let mut embed_buffer: Vec<(u64, String, SourceKind)> = Vec::new();
+    let mut index_pending: [u64; 3] = [0, 0, 0];
     if embeddings {
         unsafe {
             std::env::set_var("HF_HUB_DISABLE_PROGRESS_BARS", "1");
@@ -315,7 +317,12 @@ fn writer_loop(
 
     for mut record in rx.iter() {
         index.add_record(&mut writer, &record)?;
-        progress.add_indexed(record.source, 1);
+        let source_idx = record.source.idx();
+        index_pending[source_idx] += 1;
+        if index_pending[source_idx] >= INDEX_PROGRESS_BATCH {
+            progress.add_indexed(record.source, index_pending[source_idx]);
+            index_pending[source_idx] = 0;
+        }
         if embeddings && is_embedding_role(&record.role) && !record.text.is_empty() {
             let text = truncate_for_embedding(std::mem::take(&mut record.text));
             if let Some(vindex) = vector_index.as_ref()
@@ -337,6 +344,18 @@ fn writer_loop(
             }
         }
         count += 1;
+    }
+
+    // Flush any remaining index progress
+    for (idx, &pending) in index_pending.iter().enumerate() {
+        if pending > 0 {
+            let source = match idx {
+                0 => SourceKind::Claude,
+                1 => SourceKind::CodexSession,
+                _ => SourceKind::CodexHistory,
+            };
+            progress.add_indexed(source, pending);
+        }
     }
 
     writer.commit()?;
