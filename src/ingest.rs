@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use walkdir::WalkDir;
 
-const EMBED_BATCH_SIZE: usize = 16;
+const EMBED_BATCH_SIZE: usize = 64;
 const EMBED_MAX_CHARS: usize = 8192;
 
 #[derive(Debug, Clone)]
@@ -1066,7 +1066,7 @@ fn flush_embeddings(
         return Ok(0);
     }
 
-    // Batch embed all texts at once
+    // Batch embed all texts at once (ONNX Runtime handles internal parallelism)
     let texts: Vec<&str> = items.iter().map(|(_, text, _)| text.as_str()).collect();
     let embeddings = embedder.embed_texts(&texts)?;
 

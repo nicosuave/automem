@@ -1,88 +1,142 @@
 use anyhow::Result;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use memex::embed::{EmbedderHandle, ModelChoice};
 use std::time::Instant;
 
 fn generate_texts(n: usize) -> Vec<String> {
     (0..n)
         .map(|i| {
             format!(
-                "This is test sentence number {} for embedding benchmarks",
+                "This is test sentence number {} for embedding benchmarks. \
+                 We add some extra text here to make the sentences more realistic \
+                 and representative of actual embedding workloads.",
                 i
             )
         })
         .collect()
 }
 
-fn bench_model(name: &str, model_type: EmbeddingModel, dims: usize) -> Result<()> {
-    println!("\n{} ({} dims)", name, dims);
-    println!("{}", "-".repeat(60));
+fn main() -> Result<()> {
+    println!("Embedding Benchmark - Testing New Performance Options");
+    println!("======================================================");
+    println!("CPU cores: {}", std::thread::available_parallelism()?.get());
 
-    let start = Instant::now();
+    let texts = generate_texts(500);
+    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
 
-    #[cfg(target_os = "macos")]
-    let opts = {
-        use ort::execution_providers::CoreMLExecutionProvider;
-        InitOptions::new(model_type)
-            .with_show_download_progress(false)
-            .with_execution_providers(vec![CoreMLExecutionProvider::default().build()])
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let opts = InitOptions::new(model_type).with_show_download_progress(false);
-
-    let mut model = TextEmbedding::try_new(opts)?;
-    println!("  Init: {:>6}ms", start.elapsed().as_millis());
-
-    // Warmup
-    let _ = model.embed(vec!["warmup"], None)?;
-
-    // Test different batch sizes and internal batch_size param
-    let texts_500 = generate_texts(500);
-    let text_refs: Vec<&str> = texts_500.iter().map(|s| s.as_str()).collect();
-
-    // Test with different internal batch sizes
-    for internal_batch in [None, Some(32), Some(64), Some(128), Some(256)] {
+    // Test 1: Baseline (single embedder, no special options)
+    println!("\n--- Test 1: Baseline (default settings) ---");
+    {
         let start = Instant::now();
-        let embeddings = model.embed(&text_refs, internal_batch)?;
+        let mut embedder = EmbedderHandle::with_model(ModelChoice::MiniLM)?;
+        println!("  Model init: {}ms", start.elapsed().as_millis());
+
+        // Warmup
+        let _ = embedder.embed_texts(&["warmup"])?;
+
+        let start = Instant::now();
+        let results = embedder.embed_texts(&text_refs)?;
         let elapsed = start.elapsed();
-
-        let texts_per_sec = 500.0 / elapsed.as_secs_f64();
-        let batch_str = internal_batch
-            .map(|b| format!("{}", b))
-            .unwrap_or("default".to_string());
-
         println!(
-            "  500 texts (batch_size={:>7}): {:>5}ms | {:>6.0} texts/sec | {} vecs",
-            batch_str,
+            "  500 texts: {}ms ({:.0} texts/sec) - {} embeddings",
             elapsed.as_millis(),
-            texts_per_sec,
-            embeddings.len()
+            500.0 / elapsed.as_secs_f64(),
+            results.len()
         );
     }
 
-    Ok(())
-}
-
-fn main() -> Result<()> {
-    println!("Embedding Model Benchmark - Internal Batch Size Test");
-    println!("=====================================================");
-    println!("CPU cores: {}", std::thread::available_parallelism()?.get());
-    #[cfg(target_os = "macos")]
-    println!("Backend: CoreML + ONNX Runtime");
-    #[cfg(not(target_os = "macos"))]
-    println!("Backend: ONNX Runtime (CPU)");
-
-    // Just test with MiniLM and Gemma for speed
-    let models = [
-        ("MiniLM", EmbeddingModel::AllMiniLML6V2, 384),
-        ("Gemma", EmbeddingModel::EmbeddingGemma300M, 768),
-    ];
-
-    for (name, model_type, dims) in models {
-        if let Err(e) = bench_model(name, model_type, dims) {
-            println!("{}: error - {}", name, e);
+    // Test 2: Different compute units
+    for unit in ["all", "ane", "gpu", "cpu"] {
+        println!("\n--- Test 2: MEMEX_COMPUTE_UNITS={} ---", unit);
+        unsafe {
+            std::env::set_var("MEMEX_COMPUTE_UNITS", unit);
         }
+
+        let start = Instant::now();
+        let mut embedder = match EmbedderHandle::with_model(ModelChoice::MiniLM) {
+            Ok(e) => e,
+            Err(e) => {
+                println!("  Failed to init: {}", e);
+                continue;
+            }
+        };
+        println!("  Model init: {}ms", start.elapsed().as_millis());
+
+        let _ = embedder.embed_texts(&["warmup"])?;
+
+        let start = Instant::now();
+        let results = embedder.embed_texts(&text_refs)?;
+        let elapsed = start.elapsed();
+        println!(
+            "  500 texts: {}ms ({:.0} texts/sec)",
+            elapsed.as_millis(),
+            500.0 / elapsed.as_secs_f64()
+        );
+        let _ = results;
     }
 
+    // Test 3: Parallel embedding with multiple model instances
+    println!("\n--- Test 3: Parallel embedding (multiple model instances) ---");
+    for num_threads in [2, 4, 8] {
+        let texts_owned: Vec<String> = texts.iter().cloned().collect();
+
+        let start = Instant::now();
+        let results = EmbedderHandle::embed_texts_parallel(
+            texts_owned,
+            ModelChoice::MiniLM,
+            num_threads,
+        )?;
+        let elapsed = start.elapsed();
+        println!(
+            "  {} threads: {}ms ({:.0} texts/sec) - {} embeddings",
+            num_threads,
+            elapsed.as_millis(),
+            500.0 / elapsed.as_secs_f64(),
+            results.len()
+        );
+    }
+
+    // Test 4: Larger batch with Gemma model
+    println!("\n--- Test 4: Gemma model (larger, higher quality) ---");
+    unsafe {
+        std::env::set_var("MEMEX_COMPUTE_UNITS", "all");
+    }
+    {
+        let start = Instant::now();
+        let mut embedder = EmbedderHandle::with_model(ModelChoice::Gemma)?;
+        println!("  Model init: {}ms", start.elapsed().as_millis());
+
+        let _ = embedder.embed_texts(&["warmup"])?;
+
+        let start = Instant::now();
+        let results = embedder.embed_texts(&text_refs)?;
+        let elapsed = start.elapsed();
+        println!(
+            "  500 texts: {}ms ({:.0} texts/sec)",
+            elapsed.as_millis(),
+            500.0 / elapsed.as_secs_f64()
+        );
+        let _ = results;
+    }
+
+    // Test 5: Gemma parallel
+    println!("\n--- Test 5: Gemma parallel (4 threads) ---");
+    {
+        let texts_owned: Vec<String> = texts.iter().cloned().collect();
+        let start = Instant::now();
+        let results = EmbedderHandle::embed_texts_parallel(
+            texts_owned,
+            ModelChoice::Gemma,
+            4,
+        )?;
+        let elapsed = start.elapsed();
+        println!(
+            "  4 threads: {}ms ({:.0} texts/sec) - {} embeddings",
+            elapsed.as_millis(),
+            500.0 / elapsed.as_secs_f64(),
+            results.len()
+        );
+    }
+
+    println!("\nDone!");
     Ok(())
 }
