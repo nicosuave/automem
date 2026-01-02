@@ -102,6 +102,7 @@ Select via `--model` flag or `MEMEX_MODEL` env var:
 | bge | 384 | Fast | Better |
 | nomic | 768 | Moderate | Good |
 | gemma | 768 | Slowest | Best (default) |
+| potion | 256 | Fastest (tiny) | Lowest |
 
 ```
 ./target/debug/memex index --model minilm
@@ -116,7 +117,7 @@ Create `~/.memex/config.toml` (or `<root>/config.toml` if you use `--root`):
 ```toml
 embeddings = true
 auto_index_on_search = true
-model = "gemma"  # minilm, bge, nomic, gemma
+model = "gemma"  # minilm, bge, nomic, gemma, potion
 ```
 
 The skill definition is bundled in `skills/memex-search/SKILL.md`.

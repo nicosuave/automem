@@ -40,7 +40,7 @@ enum Commands {
         embeddings: bool,
         #[arg(long)]
         no_embeddings: bool,
-        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality)
+        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality), potion (tiny)
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]
@@ -57,14 +57,14 @@ enum Commands {
         embeddings: bool,
         #[arg(long)]
         no_embeddings: bool,
-        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality)
+        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality), potion (tiny)
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]
         root: Option<PathBuf>,
     },
     Embed {
-        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality)
+        /// Embedding model: minilm (fast), bge, nomic, gemma (default, best quality), potion (tiny)
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]
