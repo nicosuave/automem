@@ -10,22 +10,24 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
+          - target: x86_64-apple-darwin
             arch: x86_64
-          - os: macos-14
+          - target: aarch64-apple-darwin
             arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Package
         shell: bash
         run: |
@@ -33,7 +35,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           arch="${{ matrix.arch }}"
           artifact="memex-${version}-macos-${arch}.tar.gz"
-          tar -C target/release -czf "${artifact}" memex
+          tar -C target/${{ matrix.target }}/release -czf "${artifact}" memex
           shasum -a 256 "${artifact}" > "${artifact}.sha256"
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
