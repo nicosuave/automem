@@ -35,7 +35,7 @@ impl ModelChoice {
     }
 
     /// Parse from string (env var or config)
-    pub fn from_str(s: &str) -> Result<Self> {
+    pub fn parse(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "minilm" | "mini" | "fast" => Ok(ModelChoice::MiniLM),
             "bge" | "bge-small" | "bgesmall" => Ok(ModelChoice::BGESmall),
@@ -58,7 +58,7 @@ impl EmbedderHandle {
         // Check MEMEX_MODEL env var, default to Gemma
         let choice = std::env::var("MEMEX_MODEL")
             .ok()
-            .map(|s| ModelChoice::from_str(&s))
+            .map(|s| ModelChoice::parse(&s))
             .transpose()?
             .unwrap_or_default();
 
@@ -112,7 +112,6 @@ impl EmbedderHandle {
         let embeddings = self.model.embed(texts, None)?;
         Ok(embeddings)
     }
-
 }
 
 #[cfg(test)]
@@ -179,8 +178,7 @@ mod tests {
 
         assert!(
             cosine_sim > 0.8,
-            "expected high similarity, got {}",
-            cosine_sim
+            "expected high similarity, got {cosine_sim}"
         );
     }
 }
