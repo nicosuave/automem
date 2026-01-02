@@ -254,14 +254,8 @@ pub fn ingest_all(
         progress: progress.clone(),
         model: options.model,
     };
-    let writer_handle = std::thread::spawn(move || {
-        writer_loop(
-            writer_index,
-            rx_record,
-            delete_paths,
-            writer_ctx,
-        )
-    });
+    let writer_handle =
+        std::thread::spawn(move || writer_loop(writer_index, rx_record, delete_paths, writer_ctx));
 
     let tasks_arc = Arc::new(tasks);
     tasks_arc.par_iter().try_for_each(|task| -> Result<()> {
