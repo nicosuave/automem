@@ -2,7 +2,7 @@ use crate::config::Paths;
 use crate::embed::EmbedderHandle;
 use crate::index::SearchIndex;
 use crate::progress::Progress;
-use crate::state::{FileState, IngestState};
+use crate::state::{FileState, IngestState, ScanCache};
 use crate::types::{Record, SourceKind};
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -58,6 +58,25 @@ struct FileUpdate {
     session_id: Option<String>,
 }
 
+/// Check if scan cache is fresh; if so, skip indexing entirely.
+/// Returns Ok(None) if skipped due to fresh cache, Ok(Some(report)) if indexing ran.
+pub fn ingest_if_stale(
+    paths: &Paths,
+    index: &SearchIndex,
+    options: &IngestOptions,
+    ttl_seconds: u64,
+) -> Result<Option<IngestReport>> {
+    let cache_path = paths.state.join("scan_cache.json");
+    let cache = ScanCache::load(&cache_path)?;
+
+    if cache.is_fresh(ttl_seconds) {
+        return Ok(None);
+    }
+
+    let report = ingest_all(paths, index, options)?;
+    Ok(Some(report))
+}
+
 pub fn ingest_all(
     paths: &Paths,
     index: &SearchIndex,
@@ -70,6 +89,7 @@ pub fn ingest_all(
     let mut tasks = Vec::new();
     let mut files_scanned = 0usize;
     let mut files_skipped = 0usize;
+    let mut total_bytes = 0u64;
 
     if options.claude_source.exists() {
         let claude_files = collect_claude_files(&options.claude_source, options.include_agents)?;
@@ -83,6 +103,7 @@ pub fn ingest_all(
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             files_scanned += 1;
+            total_bytes += size;
             let key = path.to_string_lossy().to_string();
             let prev = state.files.get(&key);
             let (offset, turn_id, delete_first, skip) = match prev {
@@ -129,6 +150,7 @@ pub fn ingest_all(
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             files_scanned += 1;
+            total_bytes += size;
             let key = path.to_string_lossy().to_string();
             let prev = state.files.get(&key);
             let (offset, turn_id, delete_first, skip) = match prev {
@@ -171,6 +193,7 @@ pub fn ingest_all(
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             files_scanned += 1;
+            total_bytes += size;
             let key = history_path.to_string_lossy().to_string();
             let prev = state.files.get(&key);
             let (offset, turn_id, delete_first, skip) = match prev {
@@ -272,6 +295,12 @@ pub fn ingest_all(
     }
     state.next_doc_id = next_doc_id.load(Ordering::SeqCst);
     state.save(&state_path)?;
+
+    // Update scan cache with current scan results
+    let cache_path = paths.state.join("scan_cache.json");
+    let mut cache = ScanCache::load(&cache_path).unwrap_or_default();
+    cache.update(files_scanned, total_bytes);
+    let _ = cache.save(&cache_path);
 
     Ok(IngestReport {
         records_added,

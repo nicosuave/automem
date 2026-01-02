@@ -41,8 +41,11 @@ impl Paths {
 pub struct UserConfig {
     pub embeddings: Option<bool>,
     pub auto_index_on_search: Option<bool>,
-    /// Embedding model: minilm, bge, nomic, gemma (default), potion
+    /// Embedding model: minilm, bge, nomic, gemma, potion (default)
     pub model: Option<String>,
+    /// Scan cache TTL in seconds. If a scan was done within this time,
+    /// skip re-scanning on search. Default: 30 seconds.
+    pub scan_cache_ttl: Option<u64>,
 }
 
 impl UserConfig {
@@ -65,6 +68,10 @@ impl UserConfig {
     }
 
     pub fn model(&self) -> Option<&str> {
-        self.model.as_deref()
+        Some(self.model.as_deref().unwrap_or("potion"))
+    }
+
+    pub fn scan_cache_ttl(&self) -> u64 {
+        self.scan_cache_ttl.unwrap_or(30)
     }
 }

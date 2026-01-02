@@ -1,7 +1,7 @@
 use crate::config::{Paths, UserConfig};
 use crate::embed::EmbedderHandle;
 use crate::index::{QueryOptions, SearchIndex};
-use crate::ingest::{IngestOptions, ingest_all};
+use crate::ingest::{IngestOptions, ingest_all, ingest_if_stale};
 use crate::types::SourceFilter;
 use crate::vector::VectorIndex;
 use anyhow::{Result, anyhow};
@@ -454,6 +454,7 @@ fn run_search(
     let config = UserConfig::load(&paths)?;
     let auto_index_on_search = config.auto_index_on_search_default();
     let embeddings_default = config.embeddings_default();
+    let scan_cache_ttl = config.scan_cache_ttl();
     if auto_index_on_search {
         paths.ensure_dirs()?;
         let index = SearchIndex::open_or_create(&paths.index)?;
@@ -468,7 +469,8 @@ fn run_search(
             embeddings: embeddings_default,
             backfill_embeddings,
         };
-        let _ = ingest_all(&paths, &index, &opts)?;
+        // Skip indexing if we recently scanned (within TTL)
+        let _ = ingest_if_stale(&paths, &index, &opts, scan_cache_ttl)?;
     }
     let index = SearchIndex::open_or_create(&paths.index)?;
 
