@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            arch: x86_64
+          - os: macos-14
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          arch="${{ matrix.arch }}"
+          artifact="memex-${version}-macos-${arch}.tar.gz"
+          tar -C target/release -czf "${artifact}" memex
+          shasum -a 256 "${artifact}" > "${artifact}.sha256"
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            memex-*.tar.gz
+            memex-*.sha256
