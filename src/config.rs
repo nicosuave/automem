@@ -1,3 +1,4 @@
+use crate::embed::ModelChoice;
 use anyhow::{Result, anyhow};
 use directories::BaseDirs;
 use serde::Deserialize;
@@ -67,8 +68,17 @@ impl UserConfig {
         self.auto_index_on_search.unwrap_or(true)
     }
 
-    pub fn model(&self) -> Option<&str> {
-        Some(self.model.as_deref().unwrap_or("potion"))
+    pub fn resolve_model(&self, cli_model: Option<String>) -> Result<ModelChoice> {
+        if let Some(model) = cli_model {
+            return ModelChoice::parse(&model);
+        }
+        if let Some(model) = self.model.as_deref() {
+            return ModelChoice::parse(model);
+        }
+        if let Ok(model) = std::env::var("MEMEX_MODEL") {
+            return ModelChoice::parse(&model);
+        }
+        Ok(ModelChoice::default())
     }
 
     pub fn scan_cache_ttl(&self) -> u64 {
