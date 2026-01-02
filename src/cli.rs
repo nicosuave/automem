@@ -511,11 +511,13 @@ fn run_search(
             &index,
             &options,
             candidate_limit,
-            &render,
-            &paths,
-            model_choice,
-            recency_weight,
-            recency_half_life_days,
+            &SearchContext {
+                render: &render,
+                paths: &paths,
+                model_choice,
+                recency_weight,
+                recency_half_life_days,
+            },
         );
     }
     if semantic {
@@ -523,11 +525,13 @@ fn run_search(
             &index,
             &options,
             candidate_limit,
-            &render,
-            &paths,
-            model_choice,
-            recency_weight,
-            recency_half_life_days,
+            &SearchContext {
+                render: &render,
+                paths: &paths,
+                model_choice,
+                recency_weight,
+                recency_half_life_days,
+            },
         );
     }
     let results = index.search(&options)?;
@@ -540,18 +544,22 @@ fn run_search(
     Ok(())
 }
 
+struct SearchContext<'a> {
+    render: &'a RenderOptions,
+    paths: &'a Paths,
+    model_choice: ModelChoice,
+    recency_weight: f32,
+    recency_half_life_days: f32,
+}
+
 fn run_semantic_search(
     index: &SearchIndex,
     options: &QueryOptions,
     limit: usize,
-    render: &RenderOptions,
-    paths: &Paths,
-    model_choice: ModelChoice,
-    recency_weight: f32,
-    recency_half_life_days: f32,
+    ctx: &SearchContext,
 ) -> Result<()> {
-    let vector = VectorIndex::open(&paths.vectors)?;
-    let mut embedder = EmbedderHandle::with_model(model_choice)?;
+    let vector = VectorIndex::open(&ctx.paths.vectors)?;
+    let mut embedder = EmbedderHandle::with_model(ctx.model_choice)?;
     let embeddings = embedder.embed_texts(&[options.query.as_str()])?;
     let embedding = embeddings
         .first()
@@ -567,14 +575,14 @@ fn run_semantic_search(
                 base,
                 record.ts,
                 now_ms,
-                recency_weight,
-                recency_half_life_days,
+                ctx.recency_weight,
+                ctx.recency_half_life_days,
             );
             results.push((score, record));
         }
     }
-    let results = apply_post_processing(results, render);
-    render_results(results, render)?;
+    let results = apply_post_processing(results, ctx.render);
+    render_results(results, ctx.render)?;
     Ok(())
 }
 
@@ -582,14 +590,10 @@ fn run_hybrid_search(
     index: &SearchIndex,
     options: &QueryOptions,
     limit: usize,
-    render: &RenderOptions,
-    paths: &Paths,
-    model_choice: ModelChoice,
-    recency_weight: f32,
-    recency_half_life_days: f32,
+    ctx: &SearchContext,
 ) -> Result<()> {
-    let vector = VectorIndex::open(&paths.vectors)?;
-    let mut embedder = EmbedderHandle::with_model(model_choice)?;
+    let vector = VectorIndex::open(&ctx.paths.vectors)?;
+    let mut embedder = EmbedderHandle::with_model(ctx.model_choice)?;
 
     let bm25_k = (limit * 5).clamp(50, 500);
     let vector_k = (limit * 5).clamp(50, 500);
@@ -641,14 +645,20 @@ fn run_hybrid_search(
         .filter_map(|(doc_id, score)| {
             records.remove(&doc_id).map(|r| {
                 (
-                    apply_recency(score, r.ts, now_ms, recency_weight, recency_half_life_days),
+                    apply_recency(
+                        score,
+                        r.ts,
+                        now_ms,
+                        ctx.recency_weight,
+                        ctx.recency_half_life_days,
+                    ),
                     r,
                 )
             })
         })
         .collect();
-    let merged = apply_post_processing(merged, render);
-    render_results(merged, render)?;
+    let merged = apply_post_processing(merged, ctx.render);
+    render_results(merged, ctx.render)?;
     Ok(())
 }
 

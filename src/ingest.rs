@@ -59,6 +59,14 @@ struct FileUpdate {
     session_id: Option<String>,
 }
 
+struct WriterContext {
+    embeddings: bool,
+    do_backfill_embeddings: bool,
+    vector_dir: PathBuf,
+    progress: Arc<Progress>,
+    model: ModelChoice,
+}
+
 /// Check if scan cache is fresh; if so, skip indexing entirely.
 /// Returns Ok(None) if skipped due to fresh cache, Ok(Some(report)) if indexing ran.
 pub fn ingest_if_stale(
@@ -239,21 +247,19 @@ pub fn ingest_all(
         .collect();
 
     let writer_index = index.clone();
-    let embeddings = options.embeddings;
-    let backfill_embeddings = options.backfill_embeddings;
-    let model = options.model;
-    let vector_dir = paths.vectors.clone();
-    let progress_for_writer = progress.clone();
+    let writer_ctx = WriterContext {
+        embeddings: options.embeddings,
+        do_backfill_embeddings: options.backfill_embeddings,
+        vector_dir: paths.vectors.clone(),
+        progress: progress.clone(),
+        model: options.model,
+    };
     let writer_handle = std::thread::spawn(move || {
         writer_loop(
             writer_index,
             rx_record,
             delete_paths,
-            embeddings,
-            backfill_embeddings,
-            vector_dir,
-            progress_for_writer,
-            model,
+            writer_ctx,
         )
     });
 
@@ -317,12 +323,15 @@ fn writer_loop(
     index: SearchIndex,
     rx: Receiver<Record>,
     delete_paths: Vec<String>,
-    embeddings: bool,
-    do_backfill_embeddings: bool,
-    vector_dir: PathBuf,
-    progress: Arc<Progress>,
-    model: ModelChoice,
+    ctx: WriterContext,
 ) -> Result<(usize, usize)> {
+    let WriterContext {
+        embeddings,
+        do_backfill_embeddings,
+        vector_dir,
+        progress,
+        model,
+    } = ctx;
     let mut writer = index.writer()?;
     for path in delete_paths {
         index.delete_by_source_path(&mut writer, &path);
