@@ -41,7 +41,7 @@ impl Paths {
 pub struct UserConfig {
     pub embeddings: Option<bool>,
     pub auto_index_on_search: Option<bool>,
-    /// Embedding model: minilm, bge, nomic, gemma, potion (default)
+    /// Embedding model: minilm, bge, nomic, gemma (default), potion
     pub model: Option<String>,
     /// Scan cache TTL in seconds. If a scan was done within this time,
     /// skip re-scanning on search. Default: 30 seconds.
@@ -60,7 +60,7 @@ impl UserConfig {
     }
 
     pub fn embeddings_default(&self) -> bool {
-        self.embeddings.unwrap_or(true)
+        self.embeddings.unwrap_or(false)
     }
 
     pub fn auto_index_on_search_default(&self) -> bool {

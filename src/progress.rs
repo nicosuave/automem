@@ -71,14 +71,15 @@ impl Progress {
         claude_index.set_message("indexed 0 rec");
         claude_index.enable_steady_tick(Duration::from_millis(80));
 
-        let claude_embed = multi.add(ProgressBar::new_spinner());
-        claude_embed.set_style(spinner_style.clone());
-        if embeddings {
-            claude_embed.set_message("embedded 0");
+        let claude_embed = if embeddings {
+            let bar = multi.add(ProgressBar::new_spinner());
+            bar.set_style(spinner_style.clone());
+            bar.set_message("embedded 0");
+            bar.enable_steady_tick(Duration::from_millis(80));
+            bar
         } else {
-            claude_embed.set_message("embeddings off");
-        }
-        claude_embed.enable_steady_tick(Duration::from_millis(80));
+            ProgressBar::hidden()
+        };
 
         // Codex header
         let codex_header = multi.add(ProgressBar::new_spinner());
@@ -97,14 +98,15 @@ impl Progress {
         codex_index.set_message("indexed 0 rec");
         codex_index.enable_steady_tick(Duration::from_millis(80));
 
-        let codex_embed = multi.add(ProgressBar::new_spinner());
-        codex_embed.set_style(spinner_style);
-        if embeddings {
-            codex_embed.set_message("embedded 0");
+        let codex_embed = if embeddings {
+            let bar = multi.add(ProgressBar::new_spinner());
+            bar.set_style(spinner_style);
+            bar.set_message("embedded 0");
+            bar.enable_steady_tick(Duration::from_millis(80));
+            bar
         } else {
-            codex_embed.set_message("embeddings off");
-        }
-        codex_embed.enable_steady_tick(Duration::from_millis(80));
+            ProgressBar::hidden()
+        };
 
         Self {
             multi,
