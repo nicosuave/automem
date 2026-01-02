@@ -1,5 +1,5 @@
 use crate::config::{Paths, UserConfig};
-use crate::embed::EmbedderHandle;
+use crate::embed::{EmbedderHandle, ModelChoice};
 use crate::index::{QueryOptions, SearchIndex};
 use crate::ingest::{IngestOptions, ingest_all, ingest_if_stale};
 use crate::types::SourceFilter;
@@ -285,10 +285,7 @@ fn run_index(
     let config = UserConfig::load(&paths)?;
 
     // Model priority: CLI flag > config file > env var > default
-    if let Some(m) = model.or_else(|| config.model().map(String::from)) {
-        // SAFETY: single-threaded at this point, before any parallel work
-        unsafe { std::env::set_var("MEMEX_MODEL", m) };
-    }
+    let model_choice = config.resolve_model(model)?;
     let embeddings = resolve_flag(
         config.embeddings_default(),
         embeddings_flag,
@@ -311,6 +308,7 @@ fn run_index(
         include_codex: codex,
         embeddings,
         backfill_embeddings,
+        model: model_choice,
     };
 
     let report = ingest_all(&paths, &index, &opts)?;
@@ -338,13 +336,10 @@ fn run_embed(model: Option<String>, root: Option<PathBuf>) -> Result<()> {
     let config = UserConfig::load(&paths)?;
 
     // Model priority: CLI flag > config file > env var > default
-    if let Some(m) = model.or_else(|| config.model().map(String::from)) {
-        // SAFETY: single-threaded at this point, before any parallel work
-        unsafe { std::env::set_var("MEMEX_MODEL", m) };
-    }
+    let model_choice = config.resolve_model(model)?;
 
     let index = SearchIndex::open_or_create(&paths.index)?;
-    let mut embedder = EmbedderHandle::new()?;
+    let mut embedder = EmbedderHandle::with_model(model_choice)?;
     let mut vector = VectorIndex::open_or_create(&paths.vectors, embedder.dims)?;
 
     let progress = std::sync::Arc::new(crate::progress::Progress::new([0; 3], [0; 3], true));
@@ -452,6 +447,7 @@ fn run_search(
 ) -> Result<()> {
     let paths = Paths::new(root)?;
     let config = UserConfig::load(&paths)?;
+    let model_choice = config.resolve_model(None)?;
     let auto_index_on_search = config.auto_index_on_search_default();
     let embeddings_default = config.embeddings_default();
     let scan_cache_ttl = config.scan_cache_ttl();
@@ -468,6 +464,7 @@ fn run_search(
             include_codex: true,
             embeddings: embeddings_default,
             backfill_embeddings,
+            model: model_choice,
         };
         // Skip indexing if we recently scanned (within TTL)
         let _ = ingest_if_stale(&paths, &index, &opts, scan_cache_ttl)?;
@@ -514,10 +511,13 @@ fn run_search(
             &index,
             &options,
             candidate_limit,
-            &render,
-            &paths,
-            recency_weight,
-            recency_half_life_days,
+            &SearchContext {
+                render: &render,
+                paths: &paths,
+                model_choice,
+                recency_weight,
+                recency_half_life_days,
+            },
         );
     }
     if semantic {
@@ -525,10 +525,13 @@ fn run_search(
             &index,
             &options,
             candidate_limit,
-            &render,
-            &paths,
-            recency_weight,
-            recency_half_life_days,
+            &SearchContext {
+                render: &render,
+                paths: &paths,
+                model_choice,
+                recency_weight,
+                recency_half_life_days,
+            },
         );
     }
     let results = index.search(&options)?;
@@ -541,17 +544,22 @@ fn run_search(
     Ok(())
 }
 
+struct SearchContext<'a> {
+    render: &'a RenderOptions,
+    paths: &'a Paths,
+    model_choice: ModelChoice,
+    recency_weight: f32,
+    recency_half_life_days: f32,
+}
+
 fn run_semantic_search(
     index: &SearchIndex,
     options: &QueryOptions,
     limit: usize,
-    render: &RenderOptions,
-    paths: &Paths,
-    recency_weight: f32,
-    recency_half_life_days: f32,
+    ctx: &SearchContext,
 ) -> Result<()> {
-    let vector = VectorIndex::open(&paths.vectors)?;
-    let mut embedder = EmbedderHandle::new()?;
+    let vector = VectorIndex::open(&ctx.paths.vectors)?;
+    let mut embedder = EmbedderHandle::with_model(ctx.model_choice)?;
     let embeddings = embedder.embed_texts(&[options.query.as_str()])?;
     let embedding = embeddings
         .first()
@@ -567,14 +575,14 @@ fn run_semantic_search(
                 base,
                 record.ts,
                 now_ms,
-                recency_weight,
-                recency_half_life_days,
+                ctx.recency_weight,
+                ctx.recency_half_life_days,
             );
             results.push((score, record));
         }
     }
-    let results = apply_post_processing(results, render);
-    render_results(results, render)?;
+    let results = apply_post_processing(results, ctx.render);
+    render_results(results, ctx.render)?;
     Ok(())
 }
 
@@ -582,13 +590,10 @@ fn run_hybrid_search(
     index: &SearchIndex,
     options: &QueryOptions,
     limit: usize,
-    render: &RenderOptions,
-    paths: &Paths,
-    recency_weight: f32,
-    recency_half_life_days: f32,
+    ctx: &SearchContext,
 ) -> Result<()> {
-    let vector = VectorIndex::open(&paths.vectors)?;
-    let mut embedder = EmbedderHandle::new()?;
+    let vector = VectorIndex::open(&ctx.paths.vectors)?;
+    let mut embedder = EmbedderHandle::with_model(ctx.model_choice)?;
 
     let bm25_k = (limit * 5).clamp(50, 500);
     let vector_k = (limit * 5).clamp(50, 500);
@@ -640,14 +645,20 @@ fn run_hybrid_search(
         .filter_map(|(doc_id, score)| {
             records.remove(&doc_id).map(|r| {
                 (
-                    apply_recency(score, r.ts, now_ms, recency_weight, recency_half_life_days),
+                    apply_recency(
+                        score,
+                        r.ts,
+                        now_ms,
+                        ctx.recency_weight,
+                        ctx.recency_half_life_days,
+                    ),
                     r,
                 )
             })
         })
         .collect();
-    let merged = apply_post_processing(merged, render);
-    render_results(merged, render)?;
+    let merged = apply_post_processing(merged, ctx.render);
+    render_results(merged, ctx.render)?;
     Ok(())
 }
 

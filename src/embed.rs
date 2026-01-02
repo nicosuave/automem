@@ -57,17 +57,6 @@ pub struct EmbedderHandle {
 }
 
 impl EmbedderHandle {
-    pub fn new() -> Result<Self> {
-        // Check MEMEX_MODEL env var, default to Gemma
-        let choice = std::env::var("MEMEX_MODEL")
-            .ok()
-            .map(|s| ModelChoice::parse(&s))
-            .transpose()?
-            .unwrap_or_default();
-
-        Self::with_model(choice)
-    }
-
     pub fn with_model(choice: ModelChoice) -> Result<Self> {
         if let Some((model_type, dims)) = choice.fastembed_config() {
             // Set thread count for ONNX Runtime to use all cores
@@ -149,11 +138,21 @@ mod tests {
             .expect("lock fastembed")
     }
 
+    fn test_embedder_from_env() -> EmbedderHandle {
+        let choice = std::env::var("MEMEX_MODEL")
+            .ok()
+            .map(|s| ModelChoice::parse(&s))
+            .transpose()
+            .expect("parse MEMEX_MODEL")
+            .unwrap_or_default();
+        EmbedderHandle::with_model(choice).expect("failed to init embedder")
+    }
+
     #[test]
     fn test_embedder_init() {
         let _guard = fastembed_test_lock();
         let env_model = std::env::var("MEMEX_MODEL").ok().map(|s| s.to_lowercase());
-        let embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let embedder = test_embedder_from_env();
         // Default is Gemma with 768 dims, but env var could change it
         let is_potion = matches!(
             env_model.as_deref(),
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn test_embed_single_text() {
         let _guard = fastembed_test_lock();
-        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let mut embedder = test_embedder_from_env();
         let texts = vec!["Hello world"];
         let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
         assert_eq!(embeddings.len(), 1);
@@ -183,7 +182,7 @@ mod tests {
     #[test]
     fn test_embed_multiple_texts() {
         let _guard = fastembed_test_lock();
-        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let mut embedder = test_embedder_from_env();
         let texts = vec!["Hello world", "How are you?", "Rust is great"];
         let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
         assert_eq!(embeddings.len(), 3);
@@ -195,7 +194,7 @@ mod tests {
     #[test]
     fn test_embed_empty() {
         let _guard = fastembed_test_lock();
-        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let mut embedder = test_embedder_from_env();
         let texts: Vec<&str> = vec![];
         let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
         assert!(embeddings.is_empty());
@@ -204,7 +203,7 @@ mod tests {
     #[test]
     fn test_embeddings_are_different() {
         let _guard = fastembed_test_lock();
-        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let mut embedder = test_embedder_from_env();
         let texts = vec!["cats are cute", "dogs are loyal"];
         let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
         assert_ne!(embeddings[0], embeddings[1]);
@@ -213,7 +212,7 @@ mod tests {
     #[test]
     fn test_similar_texts_have_similar_embeddings() {
         let _guard = fastembed_test_lock();
-        let mut embedder = EmbedderHandle::new().expect("failed to init embedder");
+        let mut embedder = test_embedder_from_env();
         let texts = vec!["the cat sat on the mat", "a cat is sitting on a mat"];
         let embeddings = embedder.embed_texts(&texts).expect("failed to embed");
 

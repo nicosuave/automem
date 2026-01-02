@@ -1,5 +1,5 @@
 use crate::config::Paths;
-use crate::embed::EmbedderHandle;
+use crate::embed::{EmbedderHandle, ModelChoice};
 use crate::index::SearchIndex;
 use crate::progress::Progress;
 use crate::state::{FileState, IngestState, ScanCache};
@@ -30,6 +30,7 @@ pub struct IngestOptions {
     pub include_codex: bool,
     pub embeddings: bool,
     pub backfill_embeddings: bool,
+    pub model: ModelChoice,
 }
 
 #[derive(Debug)]
@@ -56,6 +57,14 @@ struct FileUpdate {
     path: String,
     state: FileState,
     session_id: Option<String>,
+}
+
+struct WriterContext {
+    embeddings: bool,
+    do_backfill_embeddings: bool,
+    vector_dir: PathBuf,
+    progress: Arc<Progress>,
+    model: ModelChoice,
 }
 
 /// Check if scan cache is fresh; if so, skip indexing entirely.
@@ -238,21 +247,15 @@ pub fn ingest_all(
         .collect();
 
     let writer_index = index.clone();
-    let embeddings = options.embeddings;
-    let backfill_embeddings = options.backfill_embeddings;
-    let vector_dir = paths.vectors.clone();
-    let progress_for_writer = progress.clone();
-    let writer_handle = std::thread::spawn(move || {
-        writer_loop(
-            writer_index,
-            rx_record,
-            delete_paths,
-            embeddings,
-            backfill_embeddings,
-            vector_dir,
-            progress_for_writer,
-        )
-    });
+    let writer_ctx = WriterContext {
+        embeddings: options.embeddings,
+        do_backfill_embeddings: options.backfill_embeddings,
+        vector_dir: paths.vectors.clone(),
+        progress: progress.clone(),
+        model: options.model,
+    };
+    let writer_handle =
+        std::thread::spawn(move || writer_loop(writer_index, rx_record, delete_paths, writer_ctx));
 
     let tasks_arc = Arc::new(tasks);
     tasks_arc.par_iter().try_for_each(|task| -> Result<()> {
@@ -314,11 +317,15 @@ fn writer_loop(
     index: SearchIndex,
     rx: Receiver<Record>,
     delete_paths: Vec<String>,
-    embeddings: bool,
-    do_backfill_embeddings: bool,
-    vector_dir: PathBuf,
-    progress: Arc<Progress>,
+    ctx: WriterContext,
 ) -> Result<(usize, usize)> {
+    let WriterContext {
+        embeddings,
+        do_backfill_embeddings,
+        vector_dir,
+        progress,
+        model,
+    } = ctx;
     let mut writer = index.writer()?;
     for path in delete_paths {
         index.delete_by_source_path(&mut writer, &path);
@@ -334,7 +341,7 @@ fn writer_loop(
         unsafe {
             std::env::set_var("HF_HUB_DISABLE_PROGRESS_BARS", "1");
         }
-        let handle = EmbedderHandle::new()?;
+        let handle = EmbedderHandle::with_model(model)?;
         let dims = handle.dims;
         vector_index = Some(crate::vector::VectorIndex::open_or_create(
             &vector_dir,
