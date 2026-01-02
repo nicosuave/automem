@@ -259,9 +259,7 @@ pub fn run() -> Result<()> {
                 stderr,
                 plist,
             } => {
-                run_index_service_enable(
-                    &index, label, interval, stdout, stderr, plist,
-                )?;
+                run_index_service_enable(&index, label, interval, stdout, stderr, plist)?;
             }
             IndexServiceCommand::Disable { label, plist } => {
                 run_index_service_disable(label, plist)?;
@@ -1028,7 +1026,9 @@ fn run_index_service_enable(
         return Err(anyhow!("launchd scheduling is only supported on macOS"));
     }
     if index.embeddings && index.no_embeddings {
-        return Err(anyhow!("--embeddings and --no-embeddings cannot be used together"));
+        return Err(anyhow!(
+            "--embeddings and --no-embeddings cannot be used together"
+        ));
     }
     let (label, plist_path) = resolve_service_paths(label, plist)?;
 
