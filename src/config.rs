@@ -41,7 +41,7 @@ impl Paths {
 pub struct UserConfig {
     pub embeddings: Option<bool>,
     pub auto_index_on_search: Option<bool>,
-    /// Embedding model: minilm, bge, nomic, gemma (default)
+    /// Embedding model: minilm, bge, nomic, gemma (default), potion
     pub model: Option<String>,
 }
 

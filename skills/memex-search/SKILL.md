@@ -23,7 +23,7 @@ Use this skill to index local history and retrieve results in a structured, LLM-
   - `--source <path>` for Claude logs
   - `--include-agents` to include agent transcripts
   - `--codex/--no-codex` to include or skip Codex logs
-  - `--model <minilm|bge|nomic|gemma>` to select embedding model
+  - `--model <minilm|bge|nomic|gemma|potion>` to select embedding model
   - `--root <path>` to change data root (default: `~/.memex`)
 
 ## Search (LLM default JSON)
@@ -96,7 +96,7 @@ Create `~/.memex/config.toml` (or `<root>/config.toml` if you use `--root`):
 ```toml
 embeddings = true
 auto_index_on_search = true
-model = "gemma"  # minilm, bge, nomic, gemma
+model = "gemma"  # minilm, bge, nomic, gemma, potion
 ```
 
 `auto_index_on_search` runs an incremental index update before each search.
