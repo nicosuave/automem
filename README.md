@@ -37,7 +37,6 @@ memex tui
 ```
 
 ![memex tui](docs/tui.png)
-
 Notes:
 - Embeddings are enabled by default.
 - Searches run an incremental reindex by default (configurable).
