@@ -39,6 +39,14 @@ memex setup
 
 This detects which tools are installed (Claude/Codex) and presents an interactive menu to select which to configure.
 
+## TUI
+
+```
+memex tui
+```
+
+![memex tui](docs/tui.png)
+
 ## Quickstart
 
 Index (incremental):
@@ -74,14 +82,6 @@ Human output:
 ```
 memex search "your query" -v
 ```
-
-## TUI
-
-```
-memex tui
-```
-
-![memex tui](docs/tui.png)
 
 ## Search modes
 
