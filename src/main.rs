@@ -10,6 +10,5 @@ mod types;
 mod vector;
 
 fn main() -> anyhow::Result<()> {
-    cli::check_for_update_async();
     cli::run()
 }

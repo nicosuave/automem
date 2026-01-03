@@ -187,6 +187,10 @@ enum IndexServiceCommand {
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    let is_tui = matches!(cli.command, Commands::Tui { .. });
+    if !is_tui {
+        check_for_update_async(None);
+    }
     match cli.command {
         Commands::Index {
             index,
@@ -253,7 +257,9 @@ pub fn run() -> Result<()> {
             )?;
         }
         Commands::Tui { root } => {
-            tui::run(root)?;
+            let (update_tx, update_rx) = std::sync::mpsc::channel();
+            check_for_update_async(Some(update_tx));
+            tui::run(root, Some(update_rx))?;
         }
         Commands::IndexService { action } => match action {
             IndexServiceCommand::Enable {
@@ -1761,15 +1767,20 @@ fn detect_platform() -> Result<(&'static str, &'static str)> {
 
 /// Check for updates in the background and print a warning if outdated.
 /// This is non-blocking and fails silently.
-pub fn check_for_update_async() {
-    std::thread::spawn(|| {
+pub fn check_for_update_async(sender: Option<std::sync::mpsc::Sender<String>>) {
+    std::thread::spawn(move || {
         if let Ok(latest) = fetch_latest_version() {
             let current = env!("CARGO_PKG_VERSION");
             if current != latest {
-                eprintln!(
-                    "\x1b[33mA new version of memex is available: v{latest} (current: v{current})\x1b[0m"
-                );
-                eprintln!("\x1b[33mRun 'memex update' to upgrade.\x1b[0m");
+                if let Some(sender) = sender {
+                    let message = format!("update: v{latest} (memex update)");
+                    let _ = sender.send(message);
+                } else {
+                    eprintln!(
+                        "\x1b[33mA new version of memex is available: v{latest} (current: v{current})\x1b[0m"
+                    );
+                    eprintln!("\x1b[33mRun 'memex update' to upgrade.\x1b[0m");
+                }
             }
         }
     });

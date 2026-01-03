@@ -131,10 +131,12 @@ struct App {
     last_detail_find: Option<String>,
     status: String,
     last_status_at: Option<Instant>,
+    update_message: Option<String>,
     index_rx: std::sync::mpsc::Receiver<IndexUpdate>,
     index_tx: std::sync::mpsc::Sender<IndexUpdate>,
     search_rx: std::sync::mpsc::Receiver<SearchUpdate>,
     search_tx: std::sync::mpsc::Sender<SearchUpdate>,
+    update_rx: Option<std::sync::mpsc::Receiver<String>>,
     header_area: Rect,
     body_area: Rect,
     list_area: Rect,
@@ -144,7 +146,10 @@ struct App {
     dragging: bool,
 }
 
-pub fn run(root: Option<PathBuf>) -> Result<()> {
+pub fn run(
+    root: Option<PathBuf>,
+    update_rx: Option<std::sync::mpsc::Receiver<String>>,
+) -> Result<()> {
     let paths = Paths::new(root)?;
     let config = UserConfig::load(&paths)?;
     let index = SearchIndex::open_or_create(&paths.index)?;
@@ -154,6 +159,7 @@ pub fn run(root: Option<PathBuf>) -> Result<()> {
     let mut app = App::new(
         paths, config, index, index_tx, index_rx, search_tx, search_rx,
     );
+    app.update_rx = update_rx;
     app.kickoff_index_refresh();
     app.kickoff_search();
 
@@ -198,10 +204,12 @@ impl App {
             last_detail_find: None,
             status: String::new(),
             last_status_at: None,
+            update_message: None,
             index_tx,
             index_rx,
             search_tx,
             search_rx,
+            update_rx: None,
             header_area: Rect::default(),
             body_area: Rect::default(),
             list_area: Rect::default(),
@@ -501,6 +509,11 @@ impl App {
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
     loop {
         app.clear_status_if_old();
+        if let Some(update_rx) = app.update_rx.as_ref() {
+            while let Ok(message) = update_rx.try_recv() {
+                app.update_message = Some(message);
+            }
+        }
         terminal.draw(|f| draw_ui(f, app))?;
         if let Ok(update) = app.index_rx.try_recv() {
             match update {
@@ -853,7 +866,7 @@ fn draw_header(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             },
         ),
     ]);
-    let shortcuts = Line::from(vec![
+    let mut shortcuts = vec![
         Span::styled("keys: ", Style::default().fg(Color::Yellow)),
         Span::raw("tab/shift+tab focus "),
         Span::raw("| / query (clear) "),
@@ -866,7 +879,15 @@ fn draw_header(frame: &mut ratatui::Frame, app: &App, area: Rect) {
         Span::raw("| r resume "),
         Span::raw("| i index "),
         Span::raw("| esc/ctrl+q quit"),
-    ]);
+    ];
+    if let Some(message) = &app.update_message {
+        shortcuts.push(Span::raw(" | "));
+        shortcuts.push(Span::styled(
+            message.as_str(),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+    let shortcuts = Line::from(shortcuts);
 
     let paragraph = Paragraph::new(vec![line, shortcuts])
         .block(border)
