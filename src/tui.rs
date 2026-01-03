@@ -405,11 +405,11 @@ impl App {
     }
 
     fn clear_status_if_old(&mut self) {
-        if let Some(at) = self.last_status_at {
-            if at.elapsed() > Duration::from_secs(4) {
-                self.status.clear();
-                self.last_status_at = None;
-            }
+        if let Some(at) = self.last_status_at
+            && at.elapsed() > Duration::from_secs(4)
+        {
+            self.status.clear();
+            self.last_status_at = None;
         }
     }
 
@@ -590,10 +590,10 @@ fn handle_key(
                 };
             }
             KeyCode::Enter => {
-                if matches!(app.focus, Focus::Project) {
-                    if let Some(project) = app.project_options.get(app.project_selected) {
-                        app.project = project.clone();
-                    }
+                if matches!(app.focus, Focus::Project)
+                    && let Some(project) = app.project_options.get(app.project_selected)
+                {
+                    app.project = project.clone();
                 }
                 app.set_status("searching...");
                 terminal.draw(|f| draw_ui(f, app))?;
