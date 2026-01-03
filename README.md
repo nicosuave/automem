@@ -5,6 +5,9 @@ Fast local history search for Claude and Codex logs. Uses BM-25 and optionally e
 Mostly intended for agents to use via skill. Intended workflow is to ask agent about a previous session & then it can narrow things down & retrieve history as needed.
 
 Includes a TUI for browsing sessions.
+
+![memex tui](docs/tui.png)
+
 ## Install
 
 ```bash
@@ -36,7 +39,6 @@ TUI:
 memex tui
 ```
 
-![memex tui](docs/tui.png)
 Notes:
 - Embeddings are enabled by default.
 - Searches run an incremental reindex by default (configurable).
