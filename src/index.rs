@@ -8,7 +8,7 @@ use tantivy::schema::{
     FAST, Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, SchemaBuilder, TEXT,
     TextFieldIndexing, TextOptions,
 };
-use tantivy::{Index, IndexReader, IndexWriter, TantivyDocument, Term};
+use tantivy::{Index, IndexReader, IndexWriter, Order, TantivyDocument, Term};
 
 #[derive(Clone)]
 pub struct IndexFields {
@@ -134,6 +134,21 @@ impl SearchIndex {
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
         let mut records = Vec::with_capacity(top_docs.len());
         for (_score, addr) in top_docs {
+            let doc = searcher.doc::<TantivyDocument>(addr)?;
+            records.push(record_from_doc(&self.fields, &doc));
+        }
+        Ok(records)
+    }
+
+    pub fn recent_records(&self, limit: usize) -> Result<Vec<Record>> {
+        let reader = self.reader()?;
+        let searcher = reader.searcher();
+        let query = AllQuery;
+        let collector = TopDocs::with_limit(limit.max(1))
+            .order_by_fast_field::<u64>("ts", Order::Desc);
+        let top_docs: Vec<(u64, tantivy::DocAddress)> = searcher.search(&query, &collector)?;
+        let mut records = Vec::with_capacity(top_docs.len());
+        for (_ts, addr) in top_docs {
             let doc = searcher.doc::<TantivyDocument>(addr)?;
             records.push(record_from_doc(&self.fields, &doc));
         }

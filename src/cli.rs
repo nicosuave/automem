@@ -1,7 +1,8 @@
-use crate::config::{Paths, UserConfig};
+use crate::config::{Paths, UserConfig, default_claude_source};
 use crate::embed::{EmbedderHandle, ModelChoice};
 use crate::index::{QueryOptions, SearchIndex};
 use crate::ingest::{IngestOptions, ingest_all, ingest_if_stale};
+use crate::tui;
 use crate::types::SourceFilter;
 use crate::vector::VectorIndex;
 use anyhow::{Result, anyhow};
@@ -113,6 +114,11 @@ enum Commands {
         sort: SortBy,
         #[arg(short, long)]
         verbose: bool,
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
+    /// Interactive terminal UI for browsing sessions
+    Tui {
         #[arg(long)]
         root: Option<PathBuf>,
     },
@@ -252,6 +258,9 @@ pub fn run() -> Result<()> {
                 verbose,
                 root,
             )?;
+        }
+        Commands::Tui { root } => {
+            tui::run(root)?;
         }
         Commands::IndexService { action } => match action {
             IndexServiceCommand::Enable {
@@ -1310,13 +1319,6 @@ fn default_index_service_stderr(root: &std::path::Path) -> PathBuf {
 
 fn default_index_service_plist(root: &std::path::Path) -> PathBuf {
     root.join("index-service.plist")
-}
-
-fn default_claude_source() -> PathBuf {
-    let home = directories::BaseDirs::new()
-        .map(|b| b.home_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("/"));
-    home.join(".claude").join("projects")
 }
 
 fn parse_ts_millis(value: Option<String>) -> Result<Option<u64>> {

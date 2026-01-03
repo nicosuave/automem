@@ -42,6 +42,11 @@ Search (JSONL default):
 ./target/debug/memex search "your query" --limit 20
 ```
 
+TUI:
+```
+./target/debug/memex tui
+```
+
 Notes:
 - Embeddings are enabled by default.
 - Searches run an incremental reindex by default (configurable).
@@ -141,10 +146,14 @@ scan_cache_ttl = 3600  # seconds (default 1 hour)
 index_service_mode = "interval"  # interval or continuous
 index_service_interval = 3600  # seconds (ignored when mode = "continuous")
 index_service_poll_interval = 30  # seconds
+claude_resume_cmd = "your-claude-resume-command {session_id}"
+codex_resume_cmd = "your-codex-resume-command {session_id}"
 ```
 
 Service logs and the plist live under `~/.memex` by default.
 
 `scan_cache_ttl` controls how long auto-indexing considers scans fresh.
+
+Resume command templates accept `{session_id}`, `{project}`, `{source}`, `{source_path}`.
 
 The skill definition is bundled in `skills/memex-search/SKILL.md`.

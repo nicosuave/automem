@@ -38,6 +38,13 @@ impl Paths {
     }
 }
 
+pub fn default_claude_source() -> PathBuf {
+    let home = directories::BaseDirs::new()
+        .map(|b| b.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".claude").join("projects")
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UserConfig {
     pub embeddings: Option<bool>,
@@ -65,6 +72,10 @@ pub struct UserConfig {
     pub index_service_stderr: Option<PathBuf>,
     /// Background index service plist path.
     pub index_service_plist: Option<PathBuf>,
+    /// Resume command template for Claude sessions.
+    pub claude_resume_cmd: Option<String>,
+    /// Resume command template for Codex sessions.
+    pub codex_resume_cmd: Option<String>,
 }
 
 impl UserConfig {

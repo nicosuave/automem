@@ -5,6 +5,7 @@ mod index;
 mod ingest;
 mod progress;
 mod state;
+mod tui;
 mod types;
 mod vector;
 
