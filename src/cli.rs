@@ -1719,7 +1719,10 @@ fn run_update(skip_confirm: bool) -> Result<()> {
 
 fn fetch_latest_version() -> Result<String> {
     let output = std::process::Command::new("curl")
-        .args(["-fsSL", &format!("https://api.github.com/repos/{REPO}/releases/latest")])
+        .args([
+            "-fsSL",
+            &format!("https://api.github.com/repos/{REPO}/releases/latest"),
+        ])
         .output()?;
 
     if !output.status.success() {
