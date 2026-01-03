@@ -5,7 +5,6 @@ Fast local history search for Claude and Codex logs. Uses BM-25 and optionally e
 Mostly intended for agents to use via skill. Intended workflow is to ask agent about a previous session & then it can narrow things down & retrieve history as needed.
 
 Includes a TUI for browsing sessions.
-
 ## Install
 
 ```bash
@@ -37,6 +36,7 @@ TUI:
 memex tui
 ```
 
+![memex tui](docs/tui.png)
 Notes:
 - Embeddings are enabled by default.
 - Searches run an incremental reindex by default (configurable).
@@ -76,7 +76,6 @@ memex setup
 ```
 
 This detects which tools are installed (Claude/Codex) and presents an interactive menu to select which to configure.
-
 ## Search modes
 
 | Need | Command |
@@ -165,6 +164,6 @@ Service logs and the plist live under `~/.memex` by default.
 
 `scan_cache_ttl` controls how long auto-indexing considers scans fresh.
 
-Resume command templates accept `{session_id}`, `{project}`, `{source}`, `{source_path}`.
+Resume command templates accept `{session_id}`, `{project}`, `{source}`, `{source_path}`, `{source_dir}`, `{cwd}`.
 
 The skill/prompt definitions are bundled in `skills/`.
