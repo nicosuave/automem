@@ -37,10 +37,7 @@ TUI:
 memex tui
 ```
 
-TUI:
-```
-./target/debug/memex tui
-```
+![memex tui](docs/tui.png)
 
 Notes:
 - Embeddings are enabled by default.
