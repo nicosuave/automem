@@ -16,6 +16,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use std::collections::{HashMap, HashSet};
+use std::io::BufRead;
 use std::io::{Stdout, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -489,7 +490,8 @@ impl App {
             self.set_status("resume command not configured in config.toml");
             return Ok(());
         };
-        let command = expand_resume_template(&template, session);
+        let cwd = resolve_session_cwd(session).unwrap_or_else(|| session.source_dir.clone());
+        let command = expand_resume_template(&template, session, &cwd);
         run_external_command(terminal, &command)?;
         self.set_status(format!("ran: {command}"));
         Ok(())
@@ -1216,19 +1218,21 @@ fn build_detail_lines(
     Ok(lines)
 }
 
-fn expand_resume_template(template: &str, session: &SessionSummary) -> String {
+fn expand_resume_template(template: &str, session: &SessionSummary, cwd: &str) -> String {
     template
         .replace("{session_id}", &session.session_id)
         .replace("{project}", &session.project)
         .replace("{source}", session.source.label())
         .replace("{source_path}", &session.source_path)
         .replace("{source_dir}", &session.source_dir)
+        .replace("{cwd}", cwd)
 }
 
 fn default_resume_template(cmd: &str) -> Option<String> {
     match cmd {
-        "claude" => find_in_path("claude")
-            .map(|_| "cd {source_dir} && claude --resume {session_id}".to_string()),
+        "claude" => {
+            find_in_path("claude").map(|_| "cd {cwd} && claude --resume {session_id}".to_string())
+        }
         "codex" => find_in_path("codex").map(|_| "codex resume {session_id}".to_string()),
         _ => None,
     }
@@ -1416,6 +1420,50 @@ fn parent_dir(path: &str) -> String {
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+fn resolve_session_cwd(session: &SessionSummary) -> Option<String> {
+    let file = std::fs::File::open(&session.source_path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    let mut fallback: Option<String> = None;
+    for line in reader.lines().map_while(Result::ok) {
+        let value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let cwd = value
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if fallback.is_none() {
+            fallback = cwd.clone();
+        }
+
+        let session_id_match = value
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .or_else(|| value.get("session_id").and_then(|v| v.as_str()))
+            .map(|s| s == session.session_id)
+            .unwrap_or(false);
+
+        if session_id_match && cwd.is_some() {
+            return cwd;
+        }
+
+        if session.source == SourceKind::CodexSession
+            && value.get("type").and_then(|v| v.as_str()) == Some("session_meta")
+        {
+            let payload_cwd = value
+                .get("payload")
+                .and_then(|v| v.get("cwd"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if payload_cwd.is_some() {
+                return payload_cwd;
+            }
+        }
+    }
+    fallback
 }
 fn collect_projects(index: &SearchIndex, source: Option<SourceFilter>) -> Result<Vec<String>> {
     let mut set = HashSet::new();
