@@ -218,9 +218,7 @@ impl Theme {
             panel: Style::default().bg(COLOR_PANEL).fg(COLOR_TEXT),
             panel_alt: Style::default().bg(COLOR_PANEL_ALT).fg(COLOR_TEXT),
             text: Style::default().fg(COLOR_TEXT),
-            text_bold: Style::default()
-                .fg(COLOR_TEXT)
-                .add_modifier(Modifier::BOLD),
+            text_bold: Style::default().fg(COLOR_TEXT).add_modifier(Modifier::BOLD),
             muted: Style::default().fg(COLOR_MUTED),
             accent: Style::default().fg(COLOR_ACCENT),
             focus: Style::default()
@@ -792,11 +790,7 @@ fn run_loop(terminal: &mut TuiTerminal, app: &mut App) -> Result<()> {
     Ok(())
 }
 
-fn handle_key(
-    key: KeyEvent,
-    terminal: &mut TuiTerminal,
-    app: &mut App,
-) -> Result<bool> {
+fn handle_key(key: KeyEvent, terminal: &mut TuiTerminal, app: &mut App) -> Result<bool> {
     if matches!(key.code, KeyCode::Esc) {
         if matches!(app.focus, Focus::List) {
             return Ok(true);
@@ -1015,7 +1009,13 @@ fn handle_key(
 fn draw_ui(frame: &mut ratatui::Frame, app: &mut App) {
     let theme = Theme::new();
     frame.render_widget(Block::default().style(theme.base), frame.area());
-    let area = inset(frame.area(), OUTER_PAD_X, OUTER_PAD_X, OUTER_PAD_Y, OUTER_PAD_Y);
+    let area = inset(
+        frame.area(),
+        OUTER_PAD_X,
+        OUTER_PAD_X,
+        OUTER_PAD_Y,
+        OUTER_PAD_Y,
+    );
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1169,17 +1169,17 @@ fn draw_sessions_panel(
     frame.render_widget(title, header);
 
     let list_items: Vec<ListItem> = if app.results.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled("no sessions", theme.muted)))]
+        vec![ListItem::new(Line::from(Span::styled(
+            "no sessions",
+            theme.muted,
+        )))]
     } else {
         app.results
             .iter()
             .map(|session| {
                 let ts = format_ts(session.last_ts);
                 let line = Line::from(vec![
-                    Span::styled(
-                        format!("{:>4}", session.hit_count),
-                        theme.accent,
-                    ),
+                    Span::styled(format!("{:>4}", session.hit_count), theme.accent),
                     Span::raw(" "),
                     Span::styled(session.project.as_str(), theme.text),
                     Span::raw(" "),
@@ -1187,10 +1187,7 @@ fn draw_sessions_panel(
                     Span::raw(" "),
                     Span::styled(ts, theme.muted),
                     Span::raw(" "),
-                    Span::styled(
-                        session.session_id.as_str(),
-                        theme.text,
-                    ),
+                    Span::styled(session.session_id.as_str(), theme.text),
                 ]);
                 ListItem::new(line)
             })
@@ -1230,7 +1227,10 @@ fn draw_project_panel(
     frame.render_widget(title, header);
 
     let project_items: Vec<ListItem> = if app.project_options.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled("no projects", theme.muted)))]
+        vec![ListItem::new(Line::from(Span::styled(
+            "no projects",
+            theme.muted,
+        )))]
     } else {
         app.project_options
             .iter()
@@ -1575,11 +1575,7 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn run_external_command(
-    app: &mut App,
-    terminal: &mut TuiTerminal,
-    command: &str,
-) -> Result<()> {
+fn run_external_command(app: &mut App, terminal: &mut TuiTerminal, command: &str) -> Result<()> {
     app.restore_stdio()?;
     exit_terminal(terminal)?;
     let status = std::process::Command::new("sh")
@@ -1603,10 +1599,7 @@ fn run_external_command(
 
 #[cfg(unix)]
 fn open_tty() -> Result<TuiWriter> {
-    Ok(OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")?)
+    Ok(OpenOptions::new().read(true).write(true).open("/dev/tty")?)
 }
 
 #[cfg(not(unix))]
@@ -1781,7 +1774,11 @@ fn render_preview_line<'a>(line: &'a PreviewLine, theme: &Theme) -> Line<'a> {
             Span::styled("session ", theme.muted),
             Span::styled(session_id.as_str(), theme.text),
         ]),
-        PreviewLine::Meta { role, ts, highlight } => {
+        PreviewLine::Meta {
+            role,
+            ts,
+            highlight,
+        } => {
             let meta_style = if *highlight {
                 Style::default().fg(COLOR_ACCENT)
             } else {
@@ -1914,11 +1911,7 @@ fn collect_projects(index: &SearchIndex, source: Option<SourceFilter>) -> Result
 fn handle_mouse(mouse: MouseEvent, app: &mut App) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if near_divider(
-                mouse.column,
-                app.body_area,
-                app.left_width.unwrap_or(0),
-            ) {
+            if near_divider(mouse.column, app.body_area, app.left_width.unwrap_or(0)) {
                 app.dragging = true;
                 return;
             }
@@ -1981,7 +1974,10 @@ fn near_divider(x: u16, body: Rect, left_width: u16) -> bool {
     if body.width == 0 {
         return false;
     }
-    let divider_x = body.x.saturating_add(left_width).saturating_add(SPLIT_GAP / 2);
+    let divider_x = body
+        .x
+        .saturating_add(left_width)
+        .saturating_add(SPLIT_GAP / 2);
     let min_x = divider_x.saturating_sub(1);
     let max_x = divider_x.saturating_add(1);
     x >= min_x && x <= max_x
