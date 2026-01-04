@@ -1,0 +1,26 @@
+# cargo-release configuration
+# Install: cargo install cargo-release
+# Usage: cargo release patch|minor|major
+
+# Use v prefix for tags (v0.1.14)
+tag-prefix = "v"
+
+# Push to remote after release
+push = true
+
+# Create and push git tag
+tag = true
+
+# Commit the version bump
+commit = true
+
+# Sign commits (set to true if you use GPG signing)
+sign-commit = false
+sign-tag = false
+
+# Pre-release replacements (update version references in other files)
+# Uncomment and adjust if you have version references elsewhere
+# [[pre-release-replacements]]
+# file = "README.md"
+# search = "memex/v[0-9]+\\.[0-9]+\\.[0-9]+"
+# replace = "memex/v{{version}}"
