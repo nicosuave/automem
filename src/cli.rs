@@ -217,7 +217,11 @@ OUTPUT FIELDS (--fields):
         root: Option<PathBuf>,
     },
     /// Install the automem-search skill/prompt for Claude and/or Codex
-    Setup,
+    Setup {
+        /// Overwrite existing skills/prompts (useful after memex update)
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Update memex to the latest version
     Update {
         /// Skip confirmation prompt
@@ -387,8 +391,8 @@ pub fn run() -> Result<()> {
         Commands::Stats { root } => {
             run_stats(root)?;
         }
-        Commands::Setup => {
-            run_setup()?;
+        Commands::Setup { force } => {
+            run_setup(force)?;
         }
         Commands::Update { yes } => {
             run_update(yes)?;
@@ -1076,7 +1080,7 @@ fn print_vector_stats(vectors_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn run_setup() -> Result<()> {
+fn run_setup(force: bool) -> Result<()> {
     use dialoguer::{MultiSelect, theme::ColorfulTheme};
 
     let theme = ColorfulTheme::default();
@@ -1090,12 +1094,17 @@ fn run_setup() -> Result<()> {
     }
 
     // Show what will be installed
-    println!("This will install:");
+    let action = if force { "install/update" } else { "install" };
+    println!("This will {action}:");
     if claude_path.is_some() {
         println!("  Claude Code: automem-search skill, instruction-improver skill");
     }
     if codex_path.is_some() {
         println!("  Codex: automem-search prompt");
+    }
+    if force {
+        println!();
+        println!("(--force: existing files will be overwritten)");
     }
     println!();
 
@@ -1143,15 +1152,20 @@ fn run_setup() -> Result<()> {
                 // Install automem-search skill
                 let dest_dir = home.join(".claude").join("skills").join("automem-search");
                 let dest = dest_dir.join("SKILL.md");
-                if dest.exists() {
+                if dest.exists() && !force {
                     println!(
-                        "Skipping Claude skill (already installed at {}).",
+                        "Skipping Claude skill (already installed at {}). Use --force to overwrite.",
                         dest.display()
                     );
                 } else {
                     std::fs::create_dir_all(&dest_dir)?;
                     std::fs::write(&dest, claude_skill)?;
-                    println!("Installed Claude skill to {}.", dest.display());
+                    let verb = if dest.exists() {
+                        "Updated"
+                    } else {
+                        "Installed"
+                    };
+                    println!("{verb} Claude skill at {}.", dest.display());
                 }
 
                 // Install instruction-improver skill
@@ -1160,16 +1174,21 @@ fn run_setup() -> Result<()> {
                     .join("skills")
                     .join("instruction-improver");
                 let improver_dest = improver_dir.join("SKILL.md");
-                if improver_dest.exists() {
+                if improver_dest.exists() && !force {
                     println!(
-                        "Skipping instruction-improver skill (already installed at {}).",
+                        "Skipping instruction-improver skill (already installed at {}). Use --force to overwrite.",
                         improver_dest.display()
                     );
                 } else {
                     std::fs::create_dir_all(&improver_dir)?;
                     std::fs::write(&improver_dest, instruction_improver_skill)?;
+                    let verb = if improver_dest.exists() {
+                        "Updated"
+                    } else {
+                        "Installed"
+                    };
                     println!(
-                        "Installed instruction-improver skill to {}.",
+                        "{verb} instruction-improver skill at {}.",
                         improver_dest.display()
                     );
                 }
@@ -1177,15 +1196,20 @@ fn run_setup() -> Result<()> {
             "codex" => {
                 let dest_dir = home.join(".codex").join("prompts");
                 let dest = dest_dir.join("automem-search.md");
-                if dest.exists() {
+                if dest.exists() && !force {
                     println!(
-                        "Skipping Codex prompt (already installed at {}).",
+                        "Skipping Codex prompt (already installed at {}). Use --force to overwrite.",
                         dest.display()
                     );
                 } else {
                     std::fs::create_dir_all(&dest_dir)?;
                     std::fs::write(&dest, codex_prompt)?;
-                    println!("Installed Codex prompt to {}.", dest.display());
+                    let verb = if dest.exists() {
+                        "Updated"
+                    } else {
+                        "Installed"
+                    };
+                    println!("{verb} Codex prompt at {}.", dest.display());
                 }
             }
             _ => {}
@@ -1843,6 +1867,8 @@ fn run_update(skip_confirm: bool) -> Result<()> {
     let _ = std::fs::remove_file(&backup);
 
     println!("Updated memex to v{latest}");
+    println!();
+    println!("Run 'memex setup --force' to update installed skills/prompts.");
     Ok(())
 }
 
