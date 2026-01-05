@@ -14,11 +14,21 @@ Mine conversation history for user feedback patterns (frustrations, corrections,
 - `~/.claude/CLAUDE.md` (user-level, applies to all projects)
 - `.claude/CLAUDE.md` or `CLAUDE.md` (project-level, applies to current project)
 
+**CRITICAL: Ask scope upfront.** Before doing any analysis, ask the user:
+
+> Which CLAUDE.md would you like me to improve?
+> 1. **User-level** (`~/.claude/CLAUDE.md`) - applies to all projects
+> 2. **Project-level** (`.claude/CLAUDE.md` or `CLAUDE.md`) - applies to current project only
+> 3. **Both** - analyze and propose changes for both files
+
+This determines which file(s) to read, which patterns are relevant, and where to propose changes.
+
 **CRITICAL:** Before making ANY changes to CLAUDE.md:
-1. Read the existing CLAUDE.md file(s) to understand current rules
-2. Present findings and proposed additions to the user
-3. Get explicit user approval before editing
-4. Never duplicate or contradict existing rules
+1. Ask the user which scope they want (user, project, or both)
+2. Read the existing CLAUDE.md file(s) to understand current rules
+3. Present findings and proposed additions to the user
+4. Get explicit user approval before editing
+5. Never duplicate or contradict existing rules
 
 ## Execution Strategy
 
@@ -141,6 +151,57 @@ memex search "works|working|fixed|solved|done" --role user --unique-session --li
 memex search "wow|amazing|impressive|love it" --role user --unique-session --limit 20
 ```
 
+## Project-Scoped Search Strategy
+
+When the user selects **project-level** scope, you need to identify the current project name and filter searches accordingly.
+
+### Finding the Project Name
+
+The project name in memex corresponds to the directory path. To find it:
+
+1. Check the current working directory
+2. Use `memex search` with a broad query to see project names in results
+3. Look for the project field in search output
+
+```bash
+# Find all projects with recent activity
+memex search "the" --role user --limit 5 --fields project,session_id
+
+# Search within a specific project (use the directory name)
+memex search "wrong|no" --project khartoum-v2 --role user --limit 30
+memex search "thanks|great" --project my-app --role user --limit 30
+```
+
+### Project-Specific Search Examples
+
+```bash
+# Frustrations in current project only
+memex search "fuck|shit|wrong|no!" --project <PROJECT_NAME> --role user --unique-session --limit 50
+
+# Corrections in current project
+memex search "I said|I meant|that's not" --project <PROJECT_NAME> --role user --unique-session --limit 30
+
+# Praise in current project
+memex search "thanks|awesome|perfect" --project <PROJECT_NAME> --role user --unique-session --limit 50
+
+# Stack-specific issues (e.g., for a Rust project)
+memex search "cargo|rustc|borrow" --project <PROJECT_NAME> --role user --unique-session --limit 30
+```
+
+### Project vs User-Level Patterns
+
+When analyzing project-level scope:
+- Focus on patterns specific to this codebase (file structure, naming conventions)
+- Look for stack-specific frustrations (language, framework, build tools)
+- Identify project-specific workflows (deploy process, test commands)
+- Find codebase-specific knowledge (where things are, how they connect)
+
+When analyzing user-level scope:
+- Search across ALL projects (omit `--project` flag)
+- Look for behavioral patterns that repeat everywhere
+- Identify universal tool preferences
+- Find communication style issues
+
 ## Analysis Workflow
 
 ### Phase 1: Discovery (use Explore agents)
@@ -150,6 +211,8 @@ Launch parallel explore agents to:
 1. **Search negative patterns** - frustration, corrections, complaints
 2. **Search positive patterns** - praise, successful completions, approvals
 3. **Read existing CLAUDE.md** - both user-level and project-level
+
+**Important:** If user selected project-level scope, pass the project name to search agents so they use `--project <name>` in all searches.
 
 Wait for all agents to complete before proceeding.
 
