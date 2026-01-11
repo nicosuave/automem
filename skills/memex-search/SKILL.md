@@ -147,9 +147,23 @@ Use `-v/--verbose` for human-readable output:
 - `memex show <doc_id> -v`
 - `memex session <session_id> -v`
 
+## Sharing Sessions
+
+Share a session transcript via agentexport (requires `brew install nicosuave/tap/agentexport`):
+
+```
+memex share <session_id>
+memex share <session_id> --title "Bug fix session"
+```
+
+Returns an encrypted share URL like `https://agentexports.com/v/abc123#key`.
+
+In the TUI (`memex tui`), press `S` to share the selected session.
+
 ## Recommended LLM Flow
 
 1) `memex search "query" --limit 20`
 2) Pick hits using `matches` or `snippet`
 3) `memex show <doc_id>` or `memex session <session_id>`
 4) Refine with `--session`, `--role`, or time filters
+5) Share relevant sessions with `memex share <session_id>`

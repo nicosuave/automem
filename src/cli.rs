@@ -228,6 +228,24 @@ OUTPUT FIELDS (--fields):
         #[arg(short = 'y', long)]
         yes: bool,
     },
+    /// Share a session via agentexport
+    #[command(after_help = "\
+EXAMPLES:
+    memex share abc123              # Share session abc123
+    memex share abc123 --title \"Bug fix session\"  # Share with custom title
+
+REQUIREMENTS:
+    Requires agentexport to be installed: brew install nicosuave/tap/agentexport")]
+    Share {
+        /// Session ID (from search results or TUI)
+        session_id: String,
+        /// Title for the share (optional)
+        #[arg(long)]
+        title: Option<String>,
+        /// Path to memex data directory [default: ~/.memex]
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -396,6 +414,13 @@ pub fn run() -> Result<()> {
         }
         Commands::Update { yes } => {
             run_update(yes)?;
+        }
+        Commands::Share {
+            session_id,
+            title,
+            root,
+        } => {
+            run_share(session_id, title, root)?;
         }
     }
     Ok(())
@@ -1219,6 +1244,58 @@ fn run_setup(force: bool) -> Result<()> {
     println!();
     println!("Done! Restart Claude Code / Codex to pick up changes.");
 
+    Ok(())
+}
+
+fn run_share(session_id: String, title: Option<String>, root: Option<PathBuf>) -> Result<()> {
+    // Check if agentexport is installed
+    let agentexport_path = find_in_path("agentexport");
+    if agentexport_path.is_none() {
+        return Err(anyhow!(
+            "agentexport not found in PATH. Install it with: brew install nicosuave/tap/agentexport"
+        ));
+    }
+
+    // Open index and find session
+    let paths = Paths::new(root)?;
+    let index = SearchIndex::open_or_create(&paths.index)?;
+    let records = index.records_by_session_id(&session_id)?;
+
+    if records.is_empty() {
+        return Err(anyhow!("session not found: {session_id}"));
+    }
+
+    // Get source info from first record
+    let record = &records[0];
+    let source_path = &record.source_path;
+    let tool = match record.source {
+        crate::types::SourceKind::Claude => "claude",
+        crate::types::SourceKind::CodexSession | crate::types::SourceKind::CodexHistory => "codex",
+    };
+
+    // Build agentexport command
+    let mut cmd = std::process::Command::new("agentexport");
+    cmd.args(["publish", "--tool", tool, "--transcript", source_path]);
+    if let Some(t) = &title {
+        cmd.args(["--title", t]);
+    }
+
+    // Run command and capture output
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("agentexport failed: {stderr}"));
+    }
+
+    // Print the share URL (agentexport prints URL to stdout)
+    let url = String::from_utf8_lossy(&output.stdout);
+    let url = url.trim();
+    if url.is_empty() {
+        return Err(anyhow!("agentexport returned no URL"));
+    }
+
+    println!("{url}");
     Ok(())
 }
 

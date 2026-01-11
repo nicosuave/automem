@@ -700,6 +700,59 @@ impl App {
         Ok(())
     }
 
+    fn share_selected(&mut self) -> Result<()> {
+        let Some(idx) = self.selected.selected() else {
+            self.set_status("no session selected");
+            return Ok(());
+        };
+        let Some(session) = self.results.get(idx) else {
+            self.set_status("no session selected");
+            return Ok(());
+        };
+
+        // Check if agentexport is installed
+        if find_in_path("agentexport").is_none() {
+            self.set_status("agentexport not found (brew install nicosuave/tap/agentexport)");
+            return Ok(());
+        }
+
+        let tool = match session.source {
+            SourceKind::Claude => "claude",
+            SourceKind::CodexSession | SourceKind::CodexHistory => "codex",
+        };
+        let source_path = session.source_path.clone();
+
+        self.set_status("sharing...");
+
+        // Run agentexport in background
+        let output = std::process::Command::new("agentexport")
+            .args(["publish", "--tool", tool, "--transcript", &source_path])
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let url = String::from_utf8_lossy(&output.stdout);
+                let url = url.trim();
+                if url.is_empty() {
+                    self.set_status("share failed: no URL returned");
+                } else {
+                    self.set_status(format!("shared: {url}"));
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                self.set_status(format!(
+                    "share failed: {}",
+                    stderr.lines().next().unwrap_or("unknown error")
+                ));
+            }
+            Err(err) => {
+                self.set_status(format!("share failed: {err}"));
+            }
+        }
+        Ok(())
+    }
+
     fn suppress_stdio(&mut self) -> Result<()> {
         if let Some(redirect) = self.stdio_redirect.as_mut() {
             redirect.enable()?;
@@ -1000,6 +1053,9 @@ fn handle_key(key: KeyEvent, terminal: &mut TuiTerminal, app: &mut App) -> Resul
         }
         KeyCode::Char('i') => {
             app.kickoff_index_refresh();
+        }
+        KeyCode::Char('S') => {
+            let _ = app.share_selected();
         }
         _ => {}
     }
@@ -1329,6 +1385,8 @@ fn draw_footer(frame: &mut ratatui::Frame, app: &App, theme: &Theme, area: Rect)
         Span::styled(" tools  ", theme.muted),
         Span::styled("r", theme.accent),
         Span::styled(" resume  ", theme.muted),
+        Span::styled("S", theme.accent),
+        Span::styled(" share  ", theme.muted),
         Span::styled("esc", theme.accent),
         Span::styled(" quit", theme.muted),
     ]);
