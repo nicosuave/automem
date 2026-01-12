@@ -2,8 +2,8 @@
 # Install: cargo install cargo-release
 # Usage: cargo release patch|minor|major
 
-# Use v prefix for tags (v0.1.14)
-tag-prefix = "v"
+# Tag name format (v0.1.14)
+tag-name = "v{{version}}"
 
 # Push to remote after release
 push = true
