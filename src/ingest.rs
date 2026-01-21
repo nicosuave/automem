@@ -28,6 +28,7 @@ pub struct IngestOptions {
     pub claude_source: PathBuf,
     pub include_agents: bool,
     pub include_codex: bool,
+    pub include_opencode: bool,
     pub embeddings: bool,
     pub backfill_embeddings: bool,
     pub model: ModelChoice,
@@ -233,6 +234,49 @@ pub fn ingest_all(
         }
     }
 
+    if options.include_opencode {
+        let opencode_files = collect_opencode_files()?;
+        for path in opencode_files {
+            let meta = path.metadata()?;
+            let size = meta.len();
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            files_scanned += 1;
+            total_bytes += size;
+            let key = path.to_string_lossy().to_string();
+            let prev = state.files.get(&key);
+            let (offset, turn_id, delete_first, skip) = match prev {
+                None => (0, 0, false, false),
+                Some(prev) => {
+                    if size < prev.size || mtime < prev.mtime {
+                        (0, 0, true, false)
+                    } else if size == prev.size && mtime == prev.mtime {
+                        (prev.offset, prev.turn_id, false, true)
+                    } else {
+                        (prev.offset, prev.turn_id, false, false)
+                    }
+                }
+            };
+            if skip {
+                files_skipped += 1;
+                continue;
+            }
+            tasks.push(FileTask {
+                path,
+                source: SourceKind::Opencode,
+                offset,
+                turn_id,
+                size,
+                mtime,
+                delete_first,
+            });
+        }
+    }
+
     let totals = compute_totals(&tasks);
     let file_totals = compute_file_totals(&tasks);
     let progress = Arc::new(Progress::new(totals, file_totals, options.embeddings));
@@ -274,6 +318,9 @@ pub fn ingest_all(
                 &session_ids,
                 &progress,
             )?,
+            SourceKind::Opencode => {
+                parse_opencode_file(task, &tx_record, &tx_update, &next_doc_id, &progress)?
+            }
         }
         Ok(())
     })?;
@@ -336,7 +383,7 @@ fn writer_loop(
     let mut vector_index = None;
     let mut embedder: Option<EmbedderHandle> = None;
     let mut embed_buffer: Vec<(u64, String, SourceKind)> = Vec::new();
-    let mut index_pending: [u64; 3] = [0, 0, 0];
+    let mut index_pending: [u64; 4] = [0, 0, 0, 0];
     if embeddings {
         unsafe {
             std::env::set_var("HF_HUB_DISABLE_PROGRESS_BARS", "1");
@@ -388,7 +435,8 @@ fn writer_loop(
             let source = match idx {
                 0 => SourceKind::Claude,
                 1 => SourceKind::CodexSession,
-                _ => SourceKind::CodexHistory,
+                2 => SourceKind::CodexHistory,
+                _ => SourceKind::Opencode,
             };
             progress.add_indexed(source, pending);
         }
@@ -499,11 +547,54 @@ fn collect_codex_session_files() -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+fn collect_opencode_files() -> Result<Vec<PathBuf>> {
+    let root = opencode_root();
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    // In opencode, "sessions" are directories inside storage/message/
+    // e.g. storage/message/ses_.../
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir()
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("ses_")
+        {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
 fn codex_sessions_root() -> PathBuf {
     let home = directories::BaseDirs::new()
         .map(|b| b.home_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("/"));
     home.join(".codex").join("sessions")
+}
+
+fn opencode_root() -> PathBuf {
+    let home = directories::BaseDirs::new()
+        .map(|b| b.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".local")
+        .join("share")
+        .join("opencode")
+        .join("storage")
+        .join("message")
+}
+
+fn opencode_parts_root() -> PathBuf {
+    let home = directories::BaseDirs::new()
+        .map(|b| b.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".local")
+        .join("share")
+        .join("opencode")
+        .join("storage")
+        .join("part")
 }
 
 fn codex_history_path() -> PathBuf {
@@ -993,6 +1084,123 @@ fn parse_codex_history(
     Ok(())
 }
 
+fn parse_opencode_file(
+    task: &FileTask,
+    tx_record: &Sender<Record>,
+    tx_update: &Sender<FileUpdate>,
+    next_doc_id: &AtomicU64,
+    progress: &Arc<Progress>,
+) -> Result<()> {
+    let session_dir = &task.path;
+    let session_id = session_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let project = "opencode".to_string();
+
+    let mut messages = Vec::new();
+    for entry in std::fs::read_dir(session_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let file = File::open(&path)?;
+        let reader = std::io::BufReader::new(file);
+        let msg: serde_json::Value = match serde_json::from_reader(reader) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let msg_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        if msg_id.is_empty() {
+            continue;
+        }
+        let timestamp = msg
+            .get("time")
+            .and_then(|t| t.get("created"))
+            .and_then(|c| c.as_u64())
+            .unwrap_or(0);
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+
+        messages.push((msg_id.to_string(), timestamp, role.to_string()));
+    }
+
+    messages.sort_by_key(|k| k.1);
+
+    let parts_root = opencode_parts_root();
+    let mut turn_id = task.turn_id;
+
+    for (msg_id, timestamp, role) in messages {
+        let part_dir = parts_root.join(&msg_id);
+        if !part_dir.exists() {
+            continue;
+        }
+
+        let mut part_files: Vec<_> = std::fs::read_dir(&part_dir)?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        // Ensure deterministic order for message parts
+        part_files.sort();
+
+        let mut text_parts = Vec::new();
+        for path in part_files {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let file = File::open(&path)?;
+            let reader = std::io::BufReader::new(file);
+            let part: serde_json::Value = match serde_json::from_reader(reader) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                text_parts.push(text.to_string());
+            }
+        }
+
+        if text_parts.is_empty() {
+            continue;
+        }
+
+        let text = text_parts.join("\n");
+        let record = Record {
+            source: SourceKind::Opencode,
+            doc_id: next_doc_id.fetch_add(1, Ordering::SeqCst),
+            ts: timestamp,
+            project: project.clone(),
+            session_id: session_id.clone(),
+            turn_id,
+            role: role.clone(),
+            text,
+            tool_name: None,
+            tool_input: None,
+            tool_output: None,
+            source_path: session_dir.to_string_lossy().to_string(),
+        };
+        progress.add_produced(SourceKind::Opencode, 1);
+        tx_record.send(record)?;
+        turn_id += 1;
+    }
+
+    progress.add_files_done(SourceKind::Opencode, 1);
+    let state = FileState {
+        size: task.size,
+        mtime: task.mtime,
+        offset: 0,
+        turn_id,
+    };
+    tx_update.send(FileUpdate {
+        path: session_dir.to_string_lossy().to_string(),
+        state,
+        session_id: Some(session_id),
+    })?;
+    Ok(())
+}
+
 fn parse_iso_millis(input: &str) -> Option<u64> {
     DateTime::parse_from_rfc3339(input)
         .ok()
@@ -1135,8 +1343,8 @@ fn flush_embeddings(
     Ok(count)
 }
 
-fn compute_totals(tasks: &[FileTask]) -> [u64; 3] {
-    let mut totals = [0u64; 3];
+fn compute_totals(tasks: &[FileTask]) -> [u64; 4] {
+    let mut totals = [0u64; 4];
     for task in tasks {
         let remaining = task.size.saturating_sub(task.offset);
         totals[task.source.idx()] += remaining;
@@ -1144,8 +1352,8 @@ fn compute_totals(tasks: &[FileTask]) -> [u64; 3] {
     totals
 }
 
-fn compute_file_totals(tasks: &[FileTask]) -> [u64; 3] {
-    let mut totals = [0u64; 3];
+fn compute_file_totals(tasks: &[FileTask]) -> [u64; 4] {
+    let mut totals = [0u64; 4];
     for task in tasks {
         totals[task.source.idx()] += 1;
     }

@@ -7,6 +7,7 @@ pub enum SourceKind {
     Claude,
     CodexSession,
     CodexHistory,
+    Opencode,
 }
 
 impl SourceKind {
@@ -15,6 +16,7 @@ impl SourceKind {
             SourceKind::Claude => 0,
             SourceKind::CodexSession => 1,
             SourceKind::CodexHistory => 2,
+            SourceKind::Opencode => 3,
         }
     }
 
@@ -22,6 +24,7 @@ impl SourceKind {
         match self {
             SourceKind::Claude => "claude",
             SourceKind::CodexSession | SourceKind::CodexHistory => "codex",
+            SourceKind::Opencode => "opencode",
         }
     }
 
@@ -30,6 +33,10 @@ impl SourceKind {
             SourceKind::CodexSession
         } else if path.contains(".codex/history.jsonl") || path.contains(".codex\\history.jsonl") {
             SourceKind::CodexHistory
+        } else if path.contains("opencode/storage/message")
+            || path.contains("opencode\\storage\\message")
+        {
+            SourceKind::Opencode
         } else {
             SourceKind::Claude
         }
@@ -41,6 +48,7 @@ impl SourceKind {
 pub enum SourceFilter {
     Claude,
     Codex,
+    Opencode,
 }
 
 impl SourceFilter {
@@ -50,6 +58,7 @@ impl SourceFilter {
             SourceFilter::Codex => {
                 source == SourceKind::CodexSession || source == SourceKind::CodexHistory
             }
+            SourceFilter::Opencode => source == SourceKind::Opencode,
         }
     }
 
@@ -57,6 +66,7 @@ impl SourceFilter {
         match self {
             SourceFilter::Claude => "claude",
             SourceFilter::Codex => "codex",
+            SourceFilter::Opencode => "opencode",
         }
     }
 }

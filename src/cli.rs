@@ -47,6 +47,9 @@ struct IndexArgs {
     /// Index Codex sessions from ~/.codex [default: true]
     #[arg(long, default_value_t = true)]
     codex: bool,
+    /// Index Opencode sessions from ~/.local/share/opencode [default: true]
+    #[arg(long, default_value_t = true)]
+    opencode: bool,
     /// Generate embeddings for semantic search during indexing
     #[arg(long)]
     embeddings: bool,
@@ -452,6 +455,7 @@ fn run_index_args(index: &IndexArgs, reindex: bool) -> Result<()> {
         index.source.clone(),
         index.include_agents,
         index.codex,
+        index.opencode,
         index.embeddings,
         index.no_embeddings,
         index.model.clone(),
@@ -465,6 +469,7 @@ fn run_index(
     source: Option<PathBuf>,
     include_agents: bool,
     codex: bool,
+    opencode: bool,
     embeddings_flag: bool,
     no_embeddings: bool,
     model: Option<String>,
@@ -496,6 +501,7 @@ fn run_index(
         claude_source: source.unwrap_or_else(default_claude_source),
         include_agents,
         include_codex: codex,
+        include_opencode: opencode,
         embeddings,
         backfill_embeddings,
         model: model_choice,
@@ -532,10 +538,10 @@ fn run_embed(model: Option<String>, root: Option<PathBuf>) -> Result<()> {
     let mut embedder = EmbedderHandle::with_model(model_choice)?;
     let mut vector = VectorIndex::open_or_create(&paths.vectors, embedder.dims)?;
 
-    let progress = std::sync::Arc::new(crate::progress::Progress::new([0; 3], [0; 3], true));
+    let progress = std::sync::Arc::new(crate::progress::Progress::new([0; 4], [0; 4], true));
     progress.set_embed_ready();
 
-    let mut embedded_counts = [0u64; 3];
+    let mut embedded_counts = [0u64; 4];
     let mut embedded_total = 0u64;
     let mut batch: Vec<(u64, String, crate::types::SourceKind)> = Vec::with_capacity(BATCH_SIZE);
 
@@ -543,7 +549,7 @@ fn run_embed(model: Option<String>, root: Option<PathBuf>) -> Result<()> {
                        embedder: &mut EmbedderHandle,
                        vector: &mut VectorIndex,
                        progress: &crate::progress::Progress,
-                       embedded_counts: &mut [u64; 3],
+                       embedded_counts: &mut [u64; 4],
                        embedded_total: &mut u64| {
         if batch.is_empty() {
             return Ok(());
@@ -600,11 +606,12 @@ fn run_embed(model: Option<String>, root: Option<PathBuf>) -> Result<()> {
     vector.save()?;
     progress.finish();
     println!(
-        "embedded {} vectors (claude {}, codex {}, history {})",
+        "embedded {} vectors (claude {}, codex {}, history {}, opencode {})",
         embedded_total,
         embedded_counts[crate::types::SourceKind::Claude.idx()],
         embedded_counts[crate::types::SourceKind::CodexSession.idx()],
         embedded_counts[crate::types::SourceKind::CodexHistory.idx()],
+        embedded_counts[crate::types::SourceKind::Opencode.idx()],
     );
 
     std::io::stdout().flush().ok();
@@ -652,6 +659,7 @@ fn run_search(
             claude_source: default_claude_source(),
             include_agents: false,
             include_codex: true,
+            include_opencode: true,
             embeddings: embeddings_default,
             backfill_embeddings,
             model: model_choice,
@@ -1126,9 +1134,10 @@ fn run_setup(force: bool) -> Result<()> {
     // Detect installed tools
     let claude_path = find_in_path("claude");
     let codex_path = find_in_path("codex");
+    let opencode_path = find_in_path("opencode");
 
-    if claude_path.is_none() && codex_path.is_none() {
-        return Err(anyhow!("Neither claude nor codex found in PATH"));
+    if claude_path.is_none() && codex_path.is_none() && opencode_path.is_none() {
+        return Err(anyhow!("Neither claude, codex, nor opencode found in PATH"));
     }
 
     // Show what will be installed
@@ -1139,6 +1148,9 @@ fn run_setup(force: bool) -> Result<()> {
     }
     if codex_path.is_some() {
         println!("  Codex: automem-search prompt");
+    }
+    if opencode_path.is_some() {
+        println!("  Opencode: automem-search prompt");
     }
     if force {
         println!();
@@ -1156,6 +1168,10 @@ fn run_setup(force: bool) -> Result<()> {
     }
     if let Some(path) = &codex_path {
         items.push(("codex", format!("Codex ({})", path.display())));
+        defaults.push(true);
+    }
+    if let Some(path) = &opencode_path {
+        items.push(("opencode", format!("Opencode ({})", path.display())));
         defaults.push(true);
     }
 
@@ -1250,12 +1266,35 @@ fn run_setup(force: bool) -> Result<()> {
                     println!("{verb} Codex prompt at {}.", dest.display());
                 }
             }
+            "opencode" => {
+                let dest_dir = home
+                    .join(".local")
+                    .join("share")
+                    .join("opencode")
+                    .join("prompts");
+                let dest = dest_dir.join("automem-search.md");
+                if dest.exists() && !force {
+                    println!(
+                        "Skipping Opencode prompt (already installed at {}). Use --force to overwrite.",
+                        dest.display()
+                    );
+                } else {
+                    std::fs::create_dir_all(&dest_dir)?;
+                    std::fs::write(&dest, codex_prompt)?;
+                    let verb = if dest.exists() {
+                        "Updated"
+                    } else {
+                        "Installed"
+                    };
+                    println!("{verb} Opencode prompt at {}.", dest.display());
+                }
+            }
             _ => {}
         }
     }
 
     println!();
-    println!("Done! Restart Claude Code / Codex to pick up changes.");
+    println!("Done! Restart Claude Code / Codex / Opencode to pick up changes.");
 
     Ok(())
 }
@@ -1280,11 +1319,12 @@ fn run_share(session_id: String, title: Option<String>, root: Option<PathBuf>) -
 
     // Get source info from first record
     let record = &records[0];
-    let source_path = &record.source_path;
     let tool = match record.source {
         crate::types::SourceKind::Claude => "claude",
         crate::types::SourceKind::CodexSession | crate::types::SourceKind::CodexHistory => "codex",
+        crate::types::SourceKind::Opencode => "opencode",
     };
+    let source_path = &record.source_path;
 
     // Build agentexport command
     let mut cmd = std::process::Command::new("agentexport");
@@ -1675,6 +1715,9 @@ fn build_index_command_args(
     }
     if !index.codex {
         args.push("--no-codex".to_string());
+    }
+    if !index.opencode {
+        args.push("--no-opencode".to_string());
     }
     if index.embeddings {
         args.push("--embeddings".to_string());

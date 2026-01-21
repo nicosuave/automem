@@ -101,6 +101,7 @@ enum SourceChoice {
     All,
     Claude,
     Codex,
+    Opencode,
 }
 
 impl SourceChoice {
@@ -108,7 +109,8 @@ impl SourceChoice {
         match self {
             SourceChoice::All => SourceChoice::Claude,
             SourceChoice::Claude => SourceChoice::Codex,
-            SourceChoice::Codex => SourceChoice::All,
+            SourceChoice::Codex => SourceChoice::Opencode,
+            SourceChoice::Opencode => SourceChoice::All,
         }
     }
 
@@ -117,6 +119,7 @@ impl SourceChoice {
             SourceChoice::All => None,
             SourceChoice::Claude => Some(SourceFilter::Claude),
             SourceChoice::Codex => Some(SourceFilter::Codex),
+            SourceChoice::Opencode => Some(SourceFilter::Opencode),
         }
     }
 
@@ -125,6 +128,7 @@ impl SourceChoice {
             SourceChoice::All => "all",
             SourceChoice::Claude => "claude",
             SourceChoice::Codex => "codex",
+            SourceChoice::Opencode => "opencode",
         }
     }
 }
@@ -434,6 +438,7 @@ impl App {
                     claude_source: default_claude_source(),
                     include_agents: false,
                     include_codex: true,
+                    include_opencode: true,
                     embeddings: embeddings_default,
                     backfill_embeddings,
                     model: model_choice,
@@ -688,6 +693,11 @@ impl App {
                 .codex_resume_cmd
                 .clone()
                 .or_else(|| default_resume_template("codex")),
+            SourceKind::Opencode => self
+                .config
+                .opencode_resume_cmd
+                .clone()
+                .or_else(|| default_resume_template("opencode")),
         };
         let Some(template) = template else {
             self.set_status("resume command not configured in config.toml");
@@ -719,6 +729,7 @@ impl App {
         let tool = match session.source {
             SourceKind::Claude => "claude",
             SourceKind::CodexSession | SourceKind::CodexHistory => "codex",
+            SourceKind::Opencode => "opencode",
         };
         let source_path = session.source_path.clone();
 
@@ -1618,6 +1629,7 @@ fn default_resume_template(cmd: &str) -> Option<String> {
             find_in_path("claude").map(|_| "cd {cwd} && claude --resume {session_id}".to_string())
         }
         "codex" => find_in_path("codex").map(|_| "codex resume {session_id}".to_string()),
+        "opencode" => find_in_path("opencode").map(|_| "opencode resume {session_id}".to_string()),
         _ => None,
     }
 }

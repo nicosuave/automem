@@ -78,6 +78,8 @@ pub struct UserConfig {
     pub claude_resume_cmd: Option<String>,
     /// Resume command template for Codex sessions.
     pub codex_resume_cmd: Option<String>,
+    /// Resume command template for Opencode sessions.
+    pub opencode_resume_cmd: Option<String>,
 }
 
 impl UserConfig {

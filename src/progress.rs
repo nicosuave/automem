@@ -3,7 +3,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-const SOURCE_COUNT: usize = 3;
+const SOURCE_COUNT: usize = 4;
 
 pub struct Progress {
     #[allow(dead_code)] // Kept alive to coordinate progress bars
@@ -12,18 +12,23 @@ pub struct Progress {
     // Headers
     claude_header: ProgressBar,
     codex_header: ProgressBar,
+    opencode_header: ProgressBar,
 
     // All spinners
     claude_parse: ProgressBar,
     codex_parse: ProgressBar,
+    opencode_parse: ProgressBar,
     claude_index: ProgressBar,
     codex_index: ProgressBar,
+    opencode_index: ProgressBar,
     claude_embed: ProgressBar,
     codex_embed: ProgressBar,
+    opencode_embed: ProgressBar,
 
     // Totals for display
     claude_files_total: u64,
     codex_files_total: u64,
+    opencode_files_total: u64,
 
     // Tracking
     files_done: [AtomicU64; SOURCE_COUNT],
@@ -45,6 +50,7 @@ impl Progress {
         let claude_files = files_total[SourceKind::Claude.idx()];
         let codex_files = files_total[SourceKind::CodexSession.idx()]
             + files_total[SourceKind::CodexHistory.idx()];
+        let opencode_files = files_total[SourceKind::Opencode.idx()];
 
         // Header style (just text)
         let header_style = ProgressStyle::with_template("{msg}").unwrap();
@@ -83,7 +89,7 @@ impl Progress {
 
         // Codex header
         let codex_header = multi.add(ProgressBar::new_spinner());
-        codex_header.set_style(header_style);
+        codex_header.set_style(header_style.clone());
         codex_header.set_message("codex");
         codex_header.tick();
 
@@ -100,6 +106,33 @@ impl Progress {
 
         let codex_embed = if embeddings {
             let bar = multi.add(ProgressBar::new_spinner());
+            bar.set_style(spinner_style.clone());
+            bar.set_message("embedded 0");
+            bar.enable_steady_tick(Duration::from_millis(80));
+            bar
+        } else {
+            ProgressBar::hidden()
+        };
+
+        // Opencode header
+        let opencode_header = multi.add(ProgressBar::new_spinner());
+        opencode_header.set_style(header_style);
+        opencode_header.set_message("opencode");
+        opencode_header.tick();
+
+        // Opencode spinners
+        let opencode_parse = multi.add(ProgressBar::new_spinner());
+        opencode_parse.set_style(spinner_style.clone());
+        opencode_parse.set_message(format!("parsed 0 B / {opencode_files} files"));
+        opencode_parse.enable_steady_tick(Duration::from_millis(80));
+
+        let opencode_index = multi.add(ProgressBar::new_spinner());
+        opencode_index.set_style(spinner_style.clone());
+        opencode_index.set_message("indexed 0 rec");
+        opencode_index.enable_steady_tick(Duration::from_millis(80));
+
+        let opencode_embed = if embeddings {
+            let bar = multi.add(ProgressBar::new_spinner());
             bar.set_style(spinner_style);
             bar.set_message("embedded 0");
             bar.enable_steady_tick(Duration::from_millis(80));
@@ -112,14 +145,19 @@ impl Progress {
             multi,
             claude_header,
             codex_header,
+            opencode_header,
             claude_parse,
             codex_parse,
+            opencode_parse,
             claude_index,
             codex_index,
+            opencode_index,
             claude_embed,
             codex_embed,
+            opencode_embed,
             claude_files_total: claude_files,
             codex_files_total: codex_files,
+            opencode_files_total: opencode_files,
             files_done: std::array::from_fn(|_| AtomicU64::new(0)),
             produced: std::array::from_fn(|_| AtomicU64::new(0)),
             embed_total: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -154,6 +192,18 @@ impl Progress {
                     self.codex_files_total
                 ));
             }
+            SourceKind::Opencode => {
+                self.opencode_parse.inc(bytes);
+                let total = self.opencode_parse.position();
+                let files_done =
+                    self.files_done[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                self.opencode_parse.set_message(format!(
+                    "parsed {} {}/{} files",
+                    format_bytes(total),
+                    files_done,
+                    self.opencode_files_total
+                ));
+            }
         }
     }
 
@@ -183,6 +233,16 @@ impl Progress {
                         "parsed {} {} files done",
                         format_bytes(bytes),
                         self.codex_files_total
+                    ));
+                }
+            }
+            SourceKind::Opencode => {
+                if done >= self.opencode_files_total {
+                    let bytes = self.opencode_parse.position();
+                    self.opencode_parse.finish_with_message(format!(
+                        "parsed {} {} files done",
+                        format_bytes(bytes),
+                        self.opencode_files_total
                     ));
                 }
             }
@@ -227,6 +287,21 @@ impl Progress {
                         .set_message(format!("indexed {} rec", format_count(indexed)));
                 }
             }
+            SourceKind::Opencode => {
+                self.opencode_index.inc(count);
+                let indexed = self.opencode_index.position();
+                let produced = self.produced[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                let files_done =
+                    self.files_done[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                // If parsing done and all produced are indexed, finish
+                if files_done >= self.opencode_files_total && indexed >= produced && produced > 0 {
+                    self.opencode_index
+                        .finish_with_message(format!("indexed {} rec done", format_count(indexed)));
+                } else {
+                    self.opencode_index
+                        .set_message(format!("indexed {} rec", format_count(indexed)));
+                }
+            }
         }
     }
 
@@ -253,6 +328,7 @@ impl Progress {
         let embedded = match source {
             SourceKind::Claude => self.claude_embed.position(),
             SourceKind::CodexSession | SourceKind::CodexHistory => self.codex_embed.position(),
+            SourceKind::Opencode => self.opencode_embed.position(),
         };
 
         let msg = format!("embedded {}", format_count(embedded));
@@ -262,6 +338,7 @@ impl Progress {
             SourceKind::CodexSession | SourceKind::CodexHistory => {
                 self.codex_embed.set_message(msg)
             }
+            SourceKind::Opencode => self.opencode_embed.set_message(msg),
         }
     }
 
@@ -301,6 +378,21 @@ impl Progress {
                     return;
                 }
             }
+            SourceKind::Opencode => {
+                self.opencode_embed.inc(count);
+                let embedded = self.opencode_embed.position();
+                let total = self.embed_total[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                let pending =
+                    self.embed_pending[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                let indexed = self.opencode_index.position();
+                let produced = self.produced[SourceKind::Opencode.idx()].load(Ordering::Relaxed);
+                // If indexing done and all embeddings done, finish
+                if indexed >= produced && pending == 0 && embedded >= total && total > 0 {
+                    self.opencode_embed
+                        .finish_with_message(format!("embedded {} done", format_count(embedded)));
+                    return;
+                }
+            }
         }
         self.update_embed_message(source);
     }
@@ -317,6 +409,9 @@ impl Progress {
             if codex_total == 0 {
                 self.codex_embed.set_message("embedded 0 ready");
             }
+            if self.embed_total[SourceKind::Opencode.idx()].load(Ordering::Relaxed) == 0 {
+                self.opencode_embed.set_message("embedded 0 ready");
+            }
         }
     }
 
@@ -324,6 +419,7 @@ impl Progress {
         // Finish headers
         self.claude_header.finish();
         self.codex_header.finish();
+        self.opencode_header.finish();
 
         // Finish parse spinners
         let claude_parsed = self.claude_parse.position();
@@ -346,6 +442,16 @@ impl Progress {
         } else {
             self.codex_parse.finish_and_clear();
         }
+        let opencode_parsed = self.opencode_parse.position();
+        if opencode_parsed > 0 {
+            self.opencode_parse.finish_with_message(format!(
+                "parsed {} {} files",
+                format_bytes(opencode_parsed),
+                self.opencode_files_total
+            ));
+        } else {
+            self.opencode_parse.finish_and_clear();
+        }
 
         // Finish index bars
         let claude_indexed = self.claude_index.position();
@@ -362,6 +468,13 @@ impl Progress {
         } else {
             self.codex_index.finish_and_clear();
         }
+        let opencode_indexed = self.opencode_index.position();
+        if opencode_indexed > 0 {
+            self.opencode_index
+                .finish_with_message(format!("indexed {} rec", format_count(opencode_indexed)));
+        } else {
+            self.opencode_index.finish_and_clear();
+        }
 
         // Finish embed bars
         let claude_embedded = self.claude_embed.position();
@@ -377,6 +490,13 @@ impl Progress {
                 .finish_with_message(format!("embedded {}", format_count(codex_embedded)));
         } else {
             self.codex_embed.finish_and_clear();
+        }
+        let opencode_embedded = self.opencode_embed.position();
+        if self.embeddings_enabled && opencode_embedded > 0 {
+            self.opencode_embed
+                .finish_with_message(format!("embedded {}", format_count(opencode_embedded)));
+        } else {
+            self.opencode_embed.finish_and_clear();
         }
     }
 }
