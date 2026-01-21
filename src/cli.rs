@@ -250,11 +250,11 @@ REQUIREMENTS:
 
 #[derive(Subcommand)]
 enum IndexServiceCommand {
-    /// Enable automatic background indexing via launchd
+    /// Enable automatic background indexing (launchd on macOS, systemd on Linux)
     Enable {
         #[command(flatten)]
         index: IndexArgs,
-        /// launchd job label [default: com.memex.index]
+        /// Service label/name [default: com.memex.index (macOS) or memex-index (Linux)]
         #[arg(long)]
         label: Option<String>,
         /// Run as a long-lived process instead of periodic execution
@@ -263,27 +263,33 @@ enum IndexServiceCommand {
         /// Seconds between index checks in continuous mode [default: 30]
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..), value_name = "SECONDS")]
         poll_interval: Option<u64>,
-        /// Seconds between launchd invocations in interval mode [default: 300]
+        /// Seconds between invocations in interval mode [default: 3600]
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..), value_name = "SECONDS")]
         interval: Option<u64>,
-        /// Path for stdout log file [default: ~/.memex/index-service.log]
+        /// Path for stdout log file [default: ~/.memex/index-service.log] (macOS only)
         #[arg(long)]
         stdout: Option<PathBuf>,
-        /// Path for stderr log file [default: ~/.memex/index-service.err.log]
+        /// Path for stderr log file [default: ~/.memex/index-service.err.log] (macOS only)
         #[arg(long)]
         stderr: Option<PathBuf>,
-        /// Path to write launchd plist [default: ~/.memex/index-service.plist]
+        /// Path to write launchd plist (macOS only) [default: ~/.memex/index-service.plist]
         #[arg(long)]
         plist: Option<PathBuf>,
+        /// Path to systemd user directory (Linux only) [default: ~/.config/systemd/user]
+        #[arg(long)]
+        systemd_dir: Option<PathBuf>,
     },
     /// Disable and remove the background indexing service
     Disable {
-        /// launchd job label [default: com.memex.index]
+        /// Service label/name [default: com.memex.index (macOS) or memex-index (Linux)]
         #[arg(long)]
         label: Option<String>,
-        /// Path to launchd plist to unload [default: ~/.memex/index-service.plist]
+        /// Path to launchd plist (macOS only) [default: ~/.memex/index-service.plist]
         #[arg(long)]
         plist: Option<PathBuf>,
+        /// Path to systemd user directory (Linux only) [default: ~/.config/systemd/user]
+        #[arg(long)]
+        systemd_dir: Option<PathBuf>,
         /// Path to memex data directory [default: ~/.memex]
         #[arg(long)]
         root: Option<PathBuf>,
@@ -376,6 +382,7 @@ pub fn run() -> Result<()> {
                 stdout,
                 stderr,
                 plist,
+                systemd_dir,
             } => {
                 run_index_service_enable(
                     &index,
@@ -386,10 +393,16 @@ pub fn run() -> Result<()> {
                     stdout,
                     stderr,
                     plist,
+                    systemd_dir,
                 )?;
             }
-            IndexServiceCommand::Disable { label, plist, root } => {
-                run_index_service_disable(label, plist, root)?;
+            IndexServiceCommand::Disable {
+                label,
+                plist,
+                systemd_dir,
+                root,
+            } => {
+                run_index_service_disable(label, plist, systemd_dir, root)?;
             }
         },
         Commands::Session {
@@ -1333,10 +1346,8 @@ fn run_index_service_enable(
     stdout: Option<PathBuf>,
     stderr: Option<PathBuf>,
     plist: Option<PathBuf>,
+    systemd_dir: Option<PathBuf>,
 ) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(anyhow!("launchd scheduling is only supported on macOS"));
-    }
     if index.embeddings && index.no_embeddings {
         return Err(anyhow!(
             "--embeddings and --no-embeddings cannot be used together"
@@ -1370,6 +1381,55 @@ fn run_index_service_enable(
     };
     let poll_interval = poll_interval.unwrap_or(config.index_service_poll_interval());
     let interval = interval.unwrap_or(config.index_service_interval());
+
+    let exe = std::env::current_exe()?;
+    let program_args = build_index_command_args(index, continuous, poll_interval);
+
+    std::fs::create_dir_all(&paths.root)?;
+
+    if cfg!(target_os = "macos") {
+        run_index_service_enable_launchd(
+            &config,
+            &paths,
+            label,
+            continuous,
+            interval,
+            stdout,
+            stderr,
+            plist,
+            &exe,
+            &program_args,
+        )
+    } else if cfg!(target_os = "linux") {
+        run_index_service_enable_systemd(
+            &config,
+            label,
+            continuous,
+            interval,
+            poll_interval,
+            systemd_dir,
+            &exe,
+            &program_args,
+        )
+    } else {
+        Err(anyhow!(
+            "background service scheduling is only supported on macOS and Linux"
+        ))
+    }
+}
+
+fn run_index_service_enable_launchd(
+    config: &UserConfig,
+    paths: &Paths,
+    label: Option<String>,
+    continuous: bool,
+    interval: u64,
+    stdout: Option<PathBuf>,
+    stderr: Option<PathBuf>,
+    plist: Option<PathBuf>,
+    exe: &std::path::Path,
+    program_args: &[String],
+) -> Result<()> {
     let default_label = default_index_service_label();
     let default_plist = default_index_service_plist(&paths.root);
     let label = label
@@ -1384,17 +1444,15 @@ fn run_index_service_enable(
     let plist_path = plist
         .or_else(|| config.index_service_plist.clone())
         .unwrap_or(default_plist);
-    validate_launchd_label(&label)?;
+    validate_service_label(&label)?;
 
-    std::fs::create_dir_all(&paths.root)?;
     if let Some(parent) = plist_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
-    let exe = std::env::current_exe()?;
-    let mut program_args = Vec::new();
-    program_args.push(exe.to_string_lossy().to_string());
-    program_args.extend(build_index_command_args(index, continuous, poll_interval));
+    let mut full_args = vec![exe.to_string_lossy().to_string()];
+    full_args.extend(program_args.iter().cloned());
+
     let (interval, keep_alive) = if continuous {
         (None, true)
     } else {
@@ -1403,7 +1461,7 @@ fn run_index_service_enable(
 
     let contents = build_launchd_plist(
         &label,
-        &program_args,
+        &full_args,
         interval,
         keep_alive,
         Some(&stdout),
@@ -1424,16 +1482,98 @@ fn run_index_service_enable(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_index_service_enable_systemd(
+    config: &UserConfig,
+    label: Option<String>,
+    continuous: bool,
+    interval: u64,
+    _poll_interval: u64,
+    systemd_dir: Option<PathBuf>,
+    exe: &std::path::Path,
+    program_args: &[String],
+) -> Result<()> {
+    let systemd_dir = systemd_dir
+        .or_else(|| config.index_service_systemd_dir.clone())
+        .unwrap_or_else(default_systemd_user_dir);
+    let label = label
+        .or_else(|| config.index_service_label.clone())
+        .unwrap_or_else(|| "memex-index".to_string());
+    validate_service_label(&label)?;
+
+    std::fs::create_dir_all(&systemd_dir)?;
+
+    let service_path = systemd_dir.join(format!("{}.service", label));
+    let timer_path = systemd_dir.join(format!("{}.timer", label));
+
+    let service_contents =
+        build_systemd_service(&exe.to_string_lossy(), program_args, continuous);
+    std::fs::write(&service_path, service_contents)?;
+    println!("wrote systemd service: {}", service_path.display());
+
+    // For interval mode, create a timer unit
+    if !continuous {
+        let timer_contents = build_systemd_timer(interval);
+        std::fs::write(&timer_path, timer_contents)?;
+        println!("wrote systemd timer: {}", timer_path.display());
+    }
+
+    // Reload systemd user daemon
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status()?;
+    if !status.success() {
+        return Err(anyhow!("systemctl daemon-reload failed"));
+    }
+
+    // Enable and start the appropriate unit
+    if continuous {
+        let status = std::process::Command::new("systemctl")
+            .args(["--user", "enable", "--now", &format!("{}.service", label)])
+            .status()?;
+        if !status.success() {
+            return Err(anyhow!("systemctl enable failed"));
+        }
+        println!("enabled systemd service: {}", label);
+    } else {
+        let status = std::process::Command::new("systemctl")
+            .args(["--user", "enable", "--now", &format!("{}.timer", label)])
+            .status()?;
+        if !status.success() {
+            return Err(anyhow!("systemctl enable failed"));
+        }
+        println!("enabled systemd timer: {}", label);
+    }
+
+    Ok(())
+}
+
 fn run_index_service_disable(
     label: Option<String>,
     plist: Option<PathBuf>,
+    systemd_dir: Option<PathBuf>,
     root: Option<PathBuf>,
 ) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        return Err(anyhow!("launchd scheduling is only supported on macOS"));
-    }
     let paths = Paths::new(root)?;
     let config = UserConfig::load(&paths)?;
+
+    if cfg!(target_os = "macos") {
+        run_index_service_disable_launchd(&config, &paths, label, plist)
+    } else if cfg!(target_os = "linux") {
+        run_index_service_disable_systemd(&config, label, systemd_dir)
+    } else {
+        Err(anyhow!(
+            "background service scheduling is only supported on macOS and Linux"
+        ))
+    }
+}
+
+fn run_index_service_disable_launchd(
+    config: &UserConfig,
+    paths: &Paths,
+    label: Option<String>,
+    plist: Option<PathBuf>,
+) -> Result<()> {
     let default_label = default_index_service_label();
     let default_plist = default_index_service_plist(&paths.root);
     let label = label
@@ -1442,7 +1582,7 @@ fn run_index_service_disable(
     let plist_path = plist
         .or_else(|| config.index_service_plist.clone())
         .unwrap_or(default_plist);
-    validate_launchd_label(&label)?;
+    validate_service_label(&label)?;
     if !plist_path.exists() {
         println!("no launchd plist found: {}", plist_path.display());
         return Ok(());
@@ -1460,12 +1600,60 @@ fn run_index_service_disable(
     Ok(())
 }
 
-fn validate_launchd_label(label: &str) -> Result<()> {
+fn run_index_service_disable_systemd(
+    config: &UserConfig,
+    label: Option<String>,
+    systemd_dir: Option<PathBuf>,
+) -> Result<()> {
+    let systemd_dir = systemd_dir
+        .or_else(|| config.index_service_systemd_dir.clone())
+        .unwrap_or_else(default_systemd_user_dir);
+    let label = label
+        .or_else(|| config.index_service_label.clone())
+        .unwrap_or_else(|| "memex-index".to_string());
+    validate_service_label(&label)?;
+
+    let service_path = systemd_dir.join(format!("{}.service", label));
+    let timer_path = systemd_dir.join(format!("{}.timer", label));
+
+    // Stop and disable timer if it exists
+    if timer_path.exists() {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "disable", "--now", &format!("{}.timer", label)])
+            .status();
+        std::fs::remove_file(&timer_path)?;
+        println!("removed systemd timer: {}", timer_path.display());
+    }
+
+    // Stop and disable service if it exists
+    if service_path.exists() {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "disable", "--now", &format!("{}.service", label)])
+            .status();
+        std::fs::remove_file(&service_path)?;
+        println!("removed systemd service: {}", service_path.display());
+    }
+
+    if !timer_path.exists() && !service_path.exists() {
+        println!("no systemd units found for: {}", label);
+        return Ok(());
+    }
+
+    // Reload daemon
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+
+    println!("disabled systemd service: {}", label);
+    Ok(())
+}
+
+fn validate_service_label(label: &str) -> Result<()> {
     if label.trim().is_empty() {
-        return Err(anyhow!("launchd label cannot be empty"));
+        return Err(anyhow!("service label cannot be empty"));
     }
     if label.contains('/') || label.contains('\\') {
-        return Err(anyhow!("launchd label cannot contain path separators"));
+        return Err(anyhow!("service label cannot contain path separators"));
     }
     Ok(())
 }
@@ -1594,6 +1782,61 @@ fn default_index_service_stderr(root: &std::path::Path) -> PathBuf {
 
 fn default_index_service_plist(root: &std::path::Path) -> PathBuf {
     root.join("index-service.plist")
+}
+
+fn default_systemd_user_dir() -> PathBuf {
+    if let Some(base) = directories::BaseDirs::new() {
+        base.config_dir().join("systemd/user")
+    } else {
+        PathBuf::from("/tmp/systemd/user")
+    }
+}
+
+fn build_systemd_service(
+    exe_path: &str,
+    program_args: &[String],
+    continuous: bool,
+) -> String {
+    let exec_start = if program_args.is_empty() {
+        exe_path.to_string()
+    } else {
+        format!("{} {}", exe_path, program_args.join(" "))
+    };
+
+    let mut out = String::new();
+    out.push_str("[Unit]\n");
+    out.push_str("Description=Memex Index Service\n");
+    out.push_str("\n");
+    out.push_str("[Service]\n");
+    out.push_str("Type=");
+    if continuous {
+        out.push_str("simple\n");
+        out.push_str("Restart=always\n");
+        out.push_str("RestartSec=10\n");
+    } else {
+        out.push_str("oneshot\n");
+    }
+    out.push_str(&format!("ExecStart={}\n", exec_start));
+    out.push_str("\n");
+    out.push_str("[Install]\n");
+    if continuous {
+        out.push_str("WantedBy=default.target\n");
+    }
+    out
+}
+
+fn build_systemd_timer(interval: u64) -> String {
+    let mut out = String::new();
+    out.push_str("[Unit]\n");
+    out.push_str("Description=Memex Index Timer\n");
+    out.push_str("\n");
+    out.push_str("[Timer]\n");
+    out.push_str("OnBootSec=5min\n");
+    out.push_str(&format!("OnUnitActiveSec={}s\n", interval));
+    out.push_str("\n");
+    out.push_str("[Install]\n");
+    out.push_str("WantedBy=timers.target\n");
+    out
 }
 
 fn parse_ts_millis(value: Option<String>) -> Result<Option<u64>> {

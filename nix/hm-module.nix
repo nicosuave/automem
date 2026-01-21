@@ -30,6 +30,11 @@ in {
         - index_service_mode (string): "interval" or "continuous"
         - index_service_interval (int): seconds
         - index_service_poll_interval (int): seconds
+        - index_service_label (string): service name for systemd/launchd
+        - index_service_systemd_dir (string): systemd user directory (Linux)
+        - index_service_plist (string): launchd plist path (macOS)
+        - index_service_stdout (string): stdout log path (macOS)
+        - index_service_stderr (string): stderr log path (macOS)
         - claude_resume_cmd (string)
         - codex_resume_cmd (string)
       '';

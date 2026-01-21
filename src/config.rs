@@ -68,10 +68,12 @@ pub struct UserConfig {
     pub index_service_label: Option<String>,
     /// Background index service stdout log path.
     pub index_service_stdout: Option<PathBuf>,
-    /// Background index service stderr log path.
+    /// Background index service stderr log path (macOS).
     pub index_service_stderr: Option<PathBuf>,
-    /// Background index service plist path.
+    /// Background index service plist path (macOS).
     pub index_service_plist: Option<PathBuf>,
+    /// Background index service systemd user directory (Linux).
+    pub index_service_systemd_dir: Option<PathBuf>,
     /// Resume command template for Claude sessions.
     pub claude_resume_cmd: Option<String>,
     /// Resume command template for Codex sessions.

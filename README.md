@@ -184,7 +184,9 @@ This detects which tools are installed (Claude/Codex) and presents an interactiv
 - `--fields score,ts,doc_id,session_id,snippet`
 - `--json-array`
 
-## Background index service (macOS launchd)
+## Background index service
+
+Works on macOS (launchd) and Linux (systemd).
 
 Enable:
 ```
@@ -198,6 +200,8 @@ memex index-service disable
 ```
 
 `index-service` reads config defaults (mode, interval, log paths). Flags override.
+
+On Linux, creates systemd user units in `~/.config/systemd/user/`. On macOS, creates a launchd plist in `~/.memex/`.
 
 ## Embeddings
 
@@ -240,11 +244,13 @@ scan_cache_ttl = 3600  # seconds (default 1 hour)
 index_service_mode = "interval"  # interval or continuous
 index_service_interval = 3600  # seconds (ignored when mode = "continuous")
 index_service_poll_interval = 30  # seconds
+index_service_label = "memex-index"  # service name (default: com.memex.index on macOS)
+index_service_systemd_dir = "~/.config/systemd/user"  # Linux only
 claude_resume_cmd = "claude --resume {session_id}"
 codex_resume_cmd = "codex resume {session_id}"
 ```
 
-Service logs and the plist live under `~/.memex` by default.
+Service logs and the plist live under `~/.memex` by default (macOS). On Linux, systemd units are created in `~/.config/systemd/user/`.
 
 `scan_cache_ttl` controls how long auto-indexing considers scans fresh.
 
