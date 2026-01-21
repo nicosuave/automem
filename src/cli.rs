@@ -1418,6 +1418,7 @@ fn run_index_service_enable(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_index_service_enable_launchd(
     config: &UserConfig,
     paths: &Paths,
@@ -1506,8 +1507,7 @@ fn run_index_service_enable_systemd(
     let service_path = systemd_dir.join(format!("{}.service", label));
     let timer_path = systemd_dir.join(format!("{}.timer", label));
 
-    let service_contents =
-        build_systemd_service(&exe.to_string_lossy(), program_args, continuous);
+    let service_contents = build_systemd_service(&exe.to_string_lossy(), program_args, continuous);
     std::fs::write(&service_path, service_contents)?;
     println!("wrote systemd service: {}", service_path.display());
 
@@ -1792,11 +1792,7 @@ fn default_systemd_user_dir() -> PathBuf {
     }
 }
 
-fn build_systemd_service(
-    exe_path: &str,
-    program_args: &[String],
-    continuous: bool,
-) -> String {
+fn build_systemd_service(exe_path: &str, program_args: &[String], continuous: bool) -> String {
     let exec_start = if program_args.is_empty() {
         exe_path.to_string()
     } else {
@@ -1806,7 +1802,7 @@ fn build_systemd_service(
     let mut out = String::new();
     out.push_str("[Unit]\n");
     out.push_str("Description=Memex Index Service\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("[Service]\n");
     out.push_str("Type=");
     if continuous {
@@ -1817,7 +1813,7 @@ fn build_systemd_service(
         out.push_str("oneshot\n");
     }
     out.push_str(&format!("ExecStart={}\n", exec_start));
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("[Install]\n");
     if continuous {
         out.push_str("WantedBy=default.target\n");
@@ -1829,11 +1825,11 @@ fn build_systemd_timer(interval: u64) -> String {
     let mut out = String::new();
     out.push_str("[Unit]\n");
     out.push_str("Description=Memex Index Timer\n");
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("[Timer]\n");
     out.push_str("OnBootSec=5min\n");
     out.push_str(&format!("OnUnitActiveSec={}s\n", interval));
-    out.push_str("\n");
+    out.push('\n');
     out.push_str("[Install]\n");
     out.push_str("WantedBy=timers.target\n");
     out
